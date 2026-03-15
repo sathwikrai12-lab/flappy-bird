@@ -678,7 +678,7 @@ function loop(){
     if(ball.powerUp!=="shield"){
       if(ball.x+ball.r>p.x && ball.x-ball.r<p.x+PW &&
          (ball.y-ball.r<p.top || ball.y+ball.r>p.bottom)){
-        triggerGameOver(); ctx.restore(); return;
+        triggerGameOver(); ctx.restore(); frames++; requestAnimationFrame(loop); return;
       }
     }
     if(!p.passed && p.x+PW<ball.x){
@@ -721,7 +721,7 @@ function loop(){
   ball.update(); ball.draw();
 
   if(ball.powerUp!=="shield"){
-    if(ball.y+ball.r>canvas.height-36){ triggerGameOver(); ctx.restore(); return; }
+    if(ball.y+ball.r>canvas.height-36){ triggerGameOver(); ctx.restore(); frames++; requestAnimationFrame(loop); return; }
   }
   if(ball.y-ball.r<0){ ball.vy=Math.abs(ball.vy)*.3; ball.y=ball.r+1; }
 
