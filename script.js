@@ -2,835 +2,887 @@
 // 🎮 Magic Ball Adventure by Sathwik Rai
 // ==============================
 
-// --- Canvas Setup ---
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
 function resizeCanvas() {
   canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight; // Fixed: was canvas.height = canvas.height
+  canvas.height = window.innerHeight;
 }
 window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
 
-// --- Game Variables ---
+// ─── DIFFICULTY SETTINGS (EASIER) ───────────────────────────
+const GRAVITY         = 0.18;   // was 0.25 — floatier
+const PIPE_GAP        = 210;    // was 160 — wider gap
+const PIPE_WIDTH      = 75;
+const PIPE_SPAWN_RATE = 120;    // was 100 — more time between pipes
+const INIT_PIPE_SPEED = 2.0;    // was 2.5 — slower start
+const SPEED_INCREMENT = 0.12;   // was 0.2 — gentler ramp
+const SPEED_UP_EVERY  = 15;     // was 10 — more forgiving ramp
+const JUMP_VELOCITY   = -5.0;   // was -5.5 — softer jump
+
+// ─── GAME STATE ───────────────────────────────────────────────
 let frames = 0;
 let score = 0;
 let coins = 0;
 let gameOver = false;
 let gameStarted = false;
-const gravity = 0.25;
-const pipeGap = 160;
-const pipeWidth = 80;
 let theme = "day";
 let combo = 0;
 let maxCombo = 0;
 let sparkles = [];
-let highScore = localStorage.getItem('flappyHighScore') || 0;
+let highScore = parseInt(localStorage.getItem('flappyHighScore')) || 0;
 let distanceTraveled = 0;
 let currentMotivationalMessage = "";
+let screenShake = 0;
+let particles = [];
+let pipeSpeed = INIT_PIPE_SPEED;
 
-// Motivational messages array
 const motivationalMessages = [
-    "Better luck next time, champ! 💪🐦",
-    "You gave it your best shot! Try again! 🔥💫",
-    "Oops! The sky's the limit — fly again! ☁️🕊️",
-    "Don't give up, legend! 🚀💖",
-    "Game over… but not your spirit! 🌟💪",
-    "Almost there! One more try, hero! 🦸‍♂️✨",
-    "You're getting better with every try! 🌟",
-    "The champion in you is waking up! 🏆",
-    "One more try and you'll beat your record! 💪"
+  "Better luck next time, champ! 💪",
+  "You gave it your best shot! Try again! 🔥",
+  "The sky's the limit — fly again! ☁️",
+  "Don't give up, legend! 🚀",
+  "One more try and you'll beat your record! 💎",
+  "You're getting better every try! ⭐",
+  "The champion in you is waking up! 🏆",
 ];
 
-// --- Sounds ---
-const flapSound = new Audio("sounds/flap.wav");
-const hitSound = new Audio("sounds/hit.wav");
-const bgm = new Audio("sounds/bgm.mp3");
-const coinSound = new Audio("sounds/coin.wav");
-const powerUpSound = new Audio("sounds/powerup.wav");
-const gameOverSound = new Audio("sounds/gameover.wav");
+// ─── SOUNDS ───────────────────────────────────────────────────
+function tryLoadAudio(path) {
+  const a = new Audio();
+  a.src = path;
+  return a;
+}
+const flapSound    = tryLoadAudio("sounds/flap.wav");
+const hitSound     = tryLoadAudio("sounds/hit.wav");
+const bgm          = tryLoadAudio("sounds/bgm.mp3");
+const coinSound    = tryLoadAudio("sounds/coin.wav");
+const powerUpSound = tryLoadAudio("sounds/powerup.wav");
+const gameOverSound= tryLoadAudio("sounds/gameover.wav");
 bgm.loop = true;
 bgm.volume = 0.4;
 hitSound.volume = 0.7;
 gameOverSound.volume = 0.6;
 
-// --- Enhanced Crystal Ball ---
+// ─── BALL ─────────────────────────────────────────────────────
 const ball = {
-  x: 100,
-  y: canvas.height / 2,
-  radius: 22,
+  x: 110,
+  y: 300,
+  radius: 20,
   velocity: 0,
-  jump: -5.5,
   rotation: 0,
   glow: 0,
   trail: [],
   powerUp: null,
   powerUpTimer: 0,
+
   update() {
-    this.velocity += gravity;
+    this.velocity += GRAVITY;
     this.y += this.velocity;
-    this.rotation += 0.08;
+    this.rotation += 0.06;
     this.glow = Math.sin(frames * 0.1) * 0.4 + 0.6;
-    
-    // Add trail particles
+
     if (frames % 2 === 0) {
       this.trail.push({
-        x: this.x,
-        y: this.y,
-        size: Math.random() * 8 + 4,
-        life: 20,
-        color: this.getTrailColor()
+        x: this.x - 5,
+        y: this.y + (Math.random() - 0.5) * 10,
+        size: Math.random() * 7 + 3,
+        life: 22,
+        color: this.getTrailColor(),
       });
     }
-    
-    // Update trail
+
     for (let i = this.trail.length - 1; i >= 0; i--) {
       this.trail[i].life--;
-      this.trail[i].size *= 0.95;
-      if (this.trail[i].life <= 0) {
-        this.trail.splice(i, 1);
-      }
+      this.trail[i].size *= 0.94;
+      if (this.trail[i].life <= 0) this.trail.splice(i, 1);
     }
-    
-    // Update power-up timer
+
     if (this.powerUp && this.powerUpTimer > 0) {
       this.powerUpTimer--;
-      if (this.powerUpTimer === 0) {
-        this.powerUp = null;
-      }
+      if (this.powerUpTimer === 0) this.powerUp = null;
     }
   },
+
   getTrailColor() {
-    if (this.powerUp === "shield") return "#00ff88";
-    if (this.powerUp === "magnet") return "#ffaa00";
-    if (this.powerUp === "speed") return "#ff4444";
-    return theme === "day" ? "#4fc3f7" : "#bb86fc";
+    if (this.powerUp === "shield") return "#34d399";
+    if (this.powerUp === "magnet") return "#fbbf24";
+    if (this.powerUp === "speed")  return "#f87171";
+    return theme === "day" ? "#60a5fa" : "#a78bfa";
   },
+
   draw() {
-    // Draw trail
-    for (const particle of this.trail) {
-      const alpha = particle.life / 20;
-      ctx.fillStyle = particle.color;
-      ctx.globalAlpha = alpha;
+    // Trail
+    for (const p of this.trail) {
+      ctx.globalAlpha = (p.life / 22) * 0.7;
+      ctx.fillStyle = p.color;
       ctx.beginPath();
-      ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.globalAlpha = 1;
-    
+
     ctx.save();
     ctx.translate(this.x, this.y);
-    ctx.rotate(this.rotation);
-    
-    // Power-up effects
+
+    // Power-up aura ring
     if (this.powerUp) {
-      const effectGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, this.radius * 2.5);
-      if (this.powerUp === "shield") {
-        effectGradient.addColorStop(0, "rgba(0, 255, 136, 0.3)");
-        effectGradient.addColorStop(1, "rgba(0, 255, 136, 0)");
-      } else if (this.powerUp === "magnet") {
-        effectGradient.addColorStop(0, "rgba(255, 170, 0, 0.3)");
-        effectGradient.addColorStop(1, "rgba(255, 170, 0, 0)");
-      } else if (this.powerUp === "speed") {
-        effectGradient.addColorStop(0, "rgba(255, 68, 68, 0.4)");
-        effectGradient.addColorStop(1, "rgba(255, 68, 68, 0)");
-      }
-      ctx.fillStyle = effectGradient;
+      const ringAlpha = 0.5 + Math.sin(frames * 0.15) * 0.3;
+      const ringColor = this.powerUp === "shield" ? "#34d399"
+                      : this.powerUp === "magnet" ? "#fbbf24"
+                      : "#f87171";
       ctx.beginPath();
-      ctx.arc(0, 0, this.radius * 2.5, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.arc(0, 0, this.radius * 2.0, 0, Math.PI * 2);
+      ctx.strokeStyle = ringColor;
+      ctx.lineWidth = 3;
+      ctx.globalAlpha = ringAlpha;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
     }
-    
+
     // Outer glow
-    const glowGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, this.radius * 2.2);
-    glowGradient.addColorStop(0, `rgba(100, 200, 255, ${this.glow * 0.6})`);
-    glowGradient.addColorStop(1, 'rgba(100, 200, 255, 0)');
-    ctx.fillStyle = glowGradient;
+    const outerGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, this.radius * 2.4);
+    const gc = this.getTrailColor();
+    outerGlow.addColorStop(0, gc + "99");
+    outerGlow.addColorStop(1, gc + "00");
+    ctx.fillStyle = outerGlow;
     ctx.beginPath();
-    ctx.arc(0, 0, this.radius * 2.2, 0, Math.PI * 2);
+    ctx.arc(0, 0, this.radius * 2.4, 0, Math.PI * 2);
     ctx.fill();
-    
-    // Main crystal ball
-    const ballGradient = ctx.createRadialGradient(-8, -8, 0, 0, 0, this.radius);
+
+    ctx.rotate(this.rotation);
+
+    // Main ball
+    const ballGrad = ctx.createRadialGradient(-7, -7, 1, 0, 0, this.radius);
     if (this.powerUp === "shield") {
-      ballGradient.addColorStop(0, '#ffffff');
-      ballGradient.addColorStop(0.3, '#00ff88');
-      ballGradient.addColorStop(1, '#00cc66');
+      ballGrad.addColorStop(0, "#ffffff");
+      ballGrad.addColorStop(0.4, "#6ee7b7");
+      ballGrad.addColorStop(1, "#059669");
     } else if (this.powerUp === "magnet") {
-      ballGradient.addColorStop(0, '#ffffff');
-      ballGradient.addColorStop(0.3, '#ffaa00');
-      ballGradient.addColorStop(1, '#ff6600');
+      ballGrad.addColorStop(0, "#ffffff");
+      ballGrad.addColorStop(0.4, "#fde68a");
+      ballGrad.addColorStop(1, "#d97706");
     } else if (this.powerUp === "speed") {
-      ballGradient.addColorStop(0, '#ffffff');
-      ballGradient.addColorStop(0.3, '#ff4444');
-      ballGradient.addColorStop(1, '#cc0000');
+      ballGrad.addColorStop(0, "#ffffff");
+      ballGrad.addColorStop(0.4, "#fca5a5");
+      ballGrad.addColorStop(1, "#dc2626");
+    } else if (theme === "day") {
+      ballGrad.addColorStop(0, "#ffffff");
+      ballGrad.addColorStop(0.3, "#93c5fd");
+      ballGrad.addColorStop(1, "#1d4ed8");
     } else {
-      ballGradient.addColorStop(0, '#ffffff');
-      ballGradient.addColorStop(0.3, '#4fc3f7');
-      ballGradient.addColorStop(1, '#0288d1');
+      ballGrad.addColorStop(0, "#ffffff");
+      ballGrad.addColorStop(0.3, "#c4b5fd");
+      ballGrad.addColorStop(1, "#7c3aed");
     }
-    
-    ctx.fillStyle = ballGradient;
+
+    ctx.shadowColor = this.getTrailColor();
+    ctx.shadowBlur = 18;
+    ctx.fillStyle = ballGrad;
     ctx.beginPath();
     ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
     ctx.fill();
-    
-    // Shine effect
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.shadowBlur = 0;
+
+    // Shine
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
     ctx.beginPath();
-    ctx.ellipse(-6, -6, 7, 5, Math.PI/4, 0, Math.PI * 2);
+    ctx.ellipse(-6, -6, 7, 5, Math.PI / 4, 0, Math.PI * 2);
     ctx.fill();
-    
-    // Inner crystal facets
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
-    ctx.lineWidth = 1;
+
+    // Inner ring
+    ctx.strokeStyle = "rgba(255,255,255,0.4)";
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.arc(0, 0, this.radius * 0.7, 0, Math.PI * 2);
+    ctx.arc(0, 0, this.radius * 0.65, 0, Math.PI * 2);
     ctx.stroke();
-    
+
     ctx.restore();
   },
+
   flap() {
-    this.velocity = this.jump;
-    flapSound.currentTime = 0;
-    flapSound.play();
-    
-    // Add extra particles on flap
-    for (let i = 0; i < 5; i++) {
+    this.velocity = JUMP_VELOCITY;
+    try { flapSound.currentTime = 0; flapSound.play(); } catch(e){}
+    for (let i = 0; i < 6; i++) {
       this.trail.push({
         x: this.x,
         y: this.y,
         size: Math.random() * 6 + 3,
-        life: 15,
-        color: this.getTrailColor()
+        life: 18,
+        color: this.getTrailColor(),
       });
     }
   },
+
   activatePowerUp(type) {
     this.powerUp = type;
-    this.powerUpTimer = type === "speed" ? 180 : 300;
-    powerUpSound.play();
+    this.powerUpTimer = type === "speed" ? 200 : 320;
+    try { powerUpSound.play(); } catch(e){}
   }
 };
 
-// --- Enhanced Coins & Power-ups ---
-const coinsArray = [];
+// ─── COINS & POWER-UPS ────────────────────────────────────────
+const coinsArray   = [];
 const powerUpsArray = [];
 
 function createSparkle(x, y, color = "#FFD700") {
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 8; i++) {
     sparkles.push({
-      x: x + (Math.random() - 0.5) * 25,
-      y: y + (Math.random() - 0.5) * 25,
+      x, y,
       size: Math.random() * 5 + 2,
-      speedX: (Math.random() - 0.5) * 5,
-      speedY: (Math.random() - 0.5) * 5,
-      life: 40,
-      color: color
+      speedX: (Math.random() - 0.5) * 6,
+      speedY: (Math.random() - 0.5) * 6,
+      life: 45,
+      color,
     });
   }
 }
 
-function drawEnhancedCoin(coin) {
-  const rotation = frames * 0.1;
-  const bounce = Math.sin(frames * 0.2) * 4;
-  const pulse = Math.sin(frames * 0.15) * 0.3 + 0.7;
-  
+function drawCoin(coin) {
+  const bounce = Math.sin(frames * 0.18 + coin.x) * 5;
+  const pulse = Math.sin(frames * 0.15) * 0.25 + 0.75;
+
   ctx.save();
   ctx.translate(coin.x, coin.y + bounce);
-  ctx.rotate(rotation);
-  
-  // Outer glow
-  const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, 25);
-  glow.addColorStop(0, `rgba(255, 215, 0, ${pulse * 0.5})`);
-  glow.addColorStop(1, 'rgba(255, 215, 0, 0)');
+
+  // Glow
+  const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, 22);
+  glow.addColorStop(0, `rgba(251,191,36,${pulse * 0.55})`);
+  glow.addColorStop(1, "rgba(251,191,36,0)");
   ctx.fillStyle = glow;
-  ctx.beginPath();
-  ctx.arc(0, 0, 25, 0, Math.PI * 2);
-  ctx.fill();
-  
-  // Main coin body
-  const gradient = ctx.createRadialGradient(-5, -5, 0, 0, 0, 14);
-  gradient.addColorStop(0, '#FFF8B3');
-  gradient.addColorStop(0.4, '#FFD700');
-  gradient.addColorStop(1, '#FF6B00');
-  ctx.fillStyle = gradient;
-  ctx.beginPath();
-  ctx.arc(0, 0, 14, 0, Math.PI * 2);
-  ctx.fill();
-  
-  // Coin edge
-  ctx.strokeStyle = '#FF9800';
-  ctx.lineWidth = 2.5;
-  ctx.beginPath();
-  ctx.arc(0, 0, 14, 0, Math.PI * 2);
+  ctx.beginPath(); ctx.arc(0, 0, 22, 0, Math.PI * 2); ctx.fill();
+
+  // Body
+  const g = ctx.createRadialGradient(-4, -4, 0, 0, 0, 13);
+  g.addColorStop(0, "#fef3c7");
+  g.addColorStop(0.5, "#fbbf24");
+  g.addColorStop(1, "#b45309");
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(0, 0, 13, 0, Math.PI * 2); ctx.fill();
+
+  ctx.strokeStyle = "#d97706"; ctx.lineWidth = 2;
   ctx.stroke();
-  
-  // Shine effect
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-  ctx.beginPath();
-  ctx.ellipse(-4, -4, 5, 4, Math.PI/4, 0, Math.PI * 2);
-  ctx.fill();
-  
-  // $ symbol for premium look
-  ctx.fillStyle = '#FF9800';
-  ctx.font = 'bold 16px Arial';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('$', 0, 0);
-  
+
+  ctx.fillStyle = "#92400e";
+  ctx.font = "bold 13px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("✦", 0, 0);
+
   ctx.restore();
 }
 
-function drawPowerUp(powerUp) {
-  const bounce = Math.sin(frames * 0.15) * 5;
+function drawPowerUp(pu) {
+  const bounce = Math.sin(frames * 0.12 + pu.x) * 6;
   const pulse = Math.sin(frames * 0.1) * 0.4 + 0.6;
-  const rotation = frames * 0.05;
-  
+
   ctx.save();
-  ctx.translate(powerUp.x, powerUp.y + bounce);
-  ctx.rotate(rotation);
-  
-  // Outer aura
+  ctx.translate(pu.x, pu.y + bounce);
+  ctx.rotate(frames * 0.04);
+
+  const colors = {
+    shield: ["#6ee7b7", "#059669"],
+    magnet: ["#fde68a", "#d97706"],
+    speed:  ["#fca5a5", "#dc2626"],
+  };
+  const [light, dark] = colors[pu.type] || ["#fff", "#999"];
+
+  // Aura
   const aura = ctx.createRadialGradient(0, 0, 0, 0, 0, 28);
-  if (powerUp.type === "shield") {
-    aura.addColorStop(0, `rgba(0, 255, 136, ${pulse * 0.6})`);
-    aura.addColorStop(1, 'rgba(0, 255, 136, 0)');
-  } else if (powerUp.type === "magnet") {
-    aura.addColorStop(0, `rgba(255, 170, 0, ${pulse * 0.6})`);
-    aura.addColorStop(1, 'rgba(255, 170, 0, 0)');
-  } else if (powerUp.type === "speed") {
-    aura.addColorStop(0, `rgba(255, 68, 68, ${pulse * 0.6})`);
-    aura.addColorStop(1, 'rgba(255, 68, 68, 0)');
-  }
+  aura.addColorStop(0, light + Math.round(pulse * 0.6 * 255).toString(16).padStart(2,"0"));
+  aura.addColorStop(1, light + "00");
   ctx.fillStyle = aura;
+  ctx.beginPath(); ctx.arc(0, 0, 28, 0, Math.PI * 2); ctx.fill();
+
+  // Hexagon body
   ctx.beginPath();
-  ctx.arc(0, 0, 28, 0, Math.PI * 2);
-  ctx.fill();
-  
-  // Main body
-  const gradient = ctx.createRadialGradient(-4, -4, 0, 0, 0, 16);
-  if (powerUp.type === "shield") {
-    gradient.addColorStop(0, '#ffffff');
-    gradient.addColorStop(0.5, '#00ff88');
-    gradient.addColorStop(1, '#00cc66');
-  } else if (powerUp.type === "magnet") {
-    gradient.addColorStop(0, '#ffffff');
-    gradient.addColorStop(0.5, '#ffaa00');
-    gradient.addColorStop(1, '#ff6600');
-  } else if (powerUp.type === "speed") {
-    gradient.addColorStop(0, '#ffffff');
-    gradient.addColorStop(0.5, '#ff4444');
-    gradient.addColorStop(1, '#cc0000');
+  for (let i = 0; i < 6; i++) {
+    const angle = (Math.PI / 3) * i - Math.PI / 6;
+    const r = 16;
+    i === 0 ? ctx.moveTo(Math.cos(angle)*r, Math.sin(angle)*r)
+            : ctx.lineTo(Math.cos(angle)*r, Math.sin(angle)*r);
   }
-  ctx.fillStyle = gradient;
-  ctx.beginPath();
-  ctx.arc(0, 0, 16, 0, Math.PI * 2);
-  ctx.fill();
-  
-  // Icon with better styling
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 18px Arial';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  
-  if (powerUp.type === "shield") {
-    ctx.fillText('🛡️', 0, 0);
-  } else if (powerUp.type === "magnet") {
-    ctx.fillText('🧲', 0, 0);
-  } else if (powerUp.type === "speed") {
-    ctx.fillText('⚡', 0, 0);
-  }
-  
+  ctx.closePath();
+  const g = ctx.createRadialGradient(-4, -4, 0, 0, 0, 16);
+  g.addColorStop(0, "#fff"); g.addColorStop(0.5, light); g.addColorStop(1, dark);
+  ctx.fillStyle = g;
+  ctx.shadowColor = light; ctx.shadowBlur = 12;
+  ctx.fill(); ctx.shadowBlur = 0;
+
+  ctx.fillStyle = "#fff";
+  ctx.font = "14px Arial";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(pu.type === "shield" ? "🛡" : pu.type === "magnet" ? "🧲" : "⚡", 0, 1);
+
   ctx.restore();
 }
 
-// --- Pipes ---
+// ─── PIPES ────────────────────────────────────────────────────
 const pipes = [];
-let pipeSpeed = 2.5;
 
 function addPipe() {
-  const topHeight = Math.random() * (canvas.height / 2) + 60;
-  pipes.push({
-    x: canvas.width,
-    top: topHeight,
-    bottom: topHeight + pipeGap,
-    passed: false
-  });
+  const minTop = 80;
+  const maxTop = canvas.height - PIPE_GAP - 80;
+  const topHeight = Math.random() * (maxTop - minTop) + minTop;
+  pipes.push({ x: canvas.width + 10, top: topHeight, bottom: topHeight + PIPE_GAP, passed: false });
 }
 
 function addRandomCoin() {
   if (pipes.length === 0) return;
+  const lp = pipes[pipes.length - 1];
+  const cy = (lp.top + lp.bottom) / 2;
 
-  const lastPipe = pipes[pipes.length - 1];
-  
-  // 60% chance to spawn a coin
-  if (Math.random() < 0.6) {
-    const gapCenterY = (lastPipe.top + lastPipe.bottom) / 2;
-    const offsetY = (Math.random() - 0.5) * (pipeGap * 0.4);
-    coinsArray.push({
-      x: lastPipe.x + pipeWidth / 2 + 80,
-      y: gapCenterY + offsetY,
-      collected: false
-    });
+  if (Math.random() < 0.65) {
+    coinsArray.push({ x: lp.x + PIPE_WIDTH / 2 + 80, y: cy + (Math.random() - 0.5) * (PIPE_GAP * 0.4), collected: false });
   }
-  
-  // 15% chance to spawn power-up
-  if (Math.random() < 0.15) {
-    const gapCenterY = (lastPipe.top + lastPipe.bottom) / 2;
-    const offsetY = (Math.random() - 0.5) * (pipeGap * 0.3);
-    const powerUpTypes = ["shield", "magnet", "speed"];
-    const randomType = powerUpTypes[Math.floor(Math.random() * powerUpTypes.length)];
-    
-    powerUpsArray.push({
-      x: lastPipe.x + pipeWidth / 2 + 120,
-      y: gapCenterY + offsetY,
-      type: randomType,
-      collected: false
-    });
+  if (Math.random() < 0.12) {
+    const types = ["shield", "magnet", "speed"];
+    powerUpsArray.push({ x: lp.x + PIPE_WIDTH / 2 + 130, y: cy + (Math.random() - 0.5) * (PIPE_GAP * 0.3), type: types[Math.floor(Math.random() * 3)], collected: false });
   }
 }
 
-// --- Background Effects ---
+// ─── BACKGROUND ───────────────────────────────────────────────
 const clouds = [];
-const stars = [];
+const stars  = [];
 
-for (let i = 0; i < 6; i++) {
-  clouds.push({
-    x: Math.random() * canvas.width,
-    y: Math.random() * (canvas.height / 2),
-    size: 60 + Math.random() * 120,
-    speed: 0.3 + Math.random() * 0.7
-  });
+for (let i = 0; i < 7; i++) {
+  clouds.push({ x: Math.random() * 2000, y: Math.random() * (canvas.height * 0.55), w: 70 + Math.random() * 130, h: 35 + Math.random() * 40, speed: 0.25 + Math.random() * 0.5 });
 }
-
-for (let i = 0; i < 80; i++) {
-  stars.push({
-    x: Math.random() * canvas.width,
-    y: Math.random() * canvas.height,
-    size: Math.random() * 2.5 + 0.5,
-    brightness: Math.random() * 0.8 + 0.2
-  });
-}
-
-function drawClouds() {
-  ctx.fillStyle = "rgba(255,255,255,0.85)";
-  for (const c of clouds) {
-    ctx.beginPath();
-    ctx.ellipse(c.x, c.y, c.size, c.size * 0.6, 0, 0, Math.PI * 2);
-    ctx.fill();
-    c.x -= c.speed;
-    if (c.x + c.size < 0) {
-      c.x = canvas.width + 100;
-      c.y = Math.random() * (canvas.height / 2);
-    }
-  }
-}
-
-function drawStars() {
-  ctx.fillStyle = "#ffffff";
-  for (const star of stars) {
-    const twinkle = Math.sin(frames * 0.05 + star.x) * 0.3 + 0.7;
-    ctx.globalAlpha = star.brightness * twinkle;
-    ctx.beginPath();
-    ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
+for (let i = 0; i < 100; i++) {
+  stars.push({ x: Math.random() * 2000, y: Math.random() * 800, size: Math.random() * 2.2 + 0.3, b: Math.random() });
 }
 
 function drawBackground() {
-  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  const g = ctx.createLinearGradient(0, 0, 0, canvas.height);
   if (theme === "day") {
-    gradient.addColorStop(0, "#87CEEB");
-    gradient.addColorStop(0.7, "#70c5ce");
-    gradient.addColorStop(1, "#90EE90");
+    g.addColorStop(0, "#0ea5e9");
+    g.addColorStop(0.55, "#38bdf8");
+    g.addColorStop(0.85, "#7dd3fc");
+    g.addColorStop(1, "#86efac");
   } else {
-    gradient.addColorStop(0, "#0d1b2a");
-    gradient.addColorStop(0.7, "#1b263b");
-    gradient.addColorStop(1, "#2a3d5e");
+    g.addColorStop(0, "#0f172a");
+    g.addColorStop(0.6, "#1e1b4b");
+    g.addColorStop(1, "#312e81");
   }
-  ctx.fillStyle = gradient;
+  ctx.fillStyle = g;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  
+
   if (theme === "night") {
-    drawStars();
+    for (const s of stars) {
+      const tw = Math.sin(frames * 0.04 + s.x) * 0.35 + 0.65;
+      ctx.globalAlpha = s.b * tw;
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(s.x % canvas.width, s.y % canvas.height, s.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
   }
-  drawClouds();
-}
 
-function toggleTheme() {
-  theme = theme === "day" ? "night" : "day";
-}
-
-// --- Game Loop ---
-function loop() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  drawBackground();
-
-  // Update sparkles
-  for (let i = sparkles.length - 1; i >= 0; i--) {
-    const s = sparkles[i];
-    s.x += s.speedX;
-    s.y += s.speedY;
-    s.life--;
-    s.size *= 0.95;
-    
-    ctx.fillStyle = s.color;
-    ctx.globalAlpha = s.life / 40;
+  // Clouds
+  ctx.fillStyle = theme === "day" ? "rgba(255,255,255,0.80)" : "rgba(255,255,255,0.08)";
+  for (const c of clouds) {
     ctx.beginPath();
-    ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+    ctx.ellipse(c.x % canvas.width, c.y, c.w, c.h, 0, 0, Math.PI * 2);
     ctx.fill();
-    
-    if (s.life <= 0) sparkles.splice(i, 1);
+    // second puff
+    ctx.beginPath();
+    ctx.ellipse((c.x + c.w * 0.55) % canvas.width, c.y - c.h * 0.3, c.w * 0.7, c.h * 0.7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    c.x -= c.speed;
+    if (c.x + c.w < 0) c.x = canvas.width + c.w;
   }
-  ctx.globalAlpha = 1;
 
-  if (!gameStarted) {
-    // Enhanced Start screen
-    ctx.fillStyle = "rgba(0,0,0,0.8)";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
-    // Title with gradient
-    const titleGradient = ctx.createLinearGradient(canvas.width/2 - 200, 0, canvas.width/2 + 200, 0);
-    titleGradient.addColorStop(0, "#4fc3f7");
-    titleGradient.addColorStop(0.5, "#ff6b6b");
-    titleGradient.addColorStop(1, "#ffd700");
-    
-    ctx.fillStyle = titleGradient;
-    ctx.font = "bold 64px 'Poppins', sans-serif";
+  // Ground strip
+  const gr = ctx.createLinearGradient(0, canvas.height - 40, 0, canvas.height);
+  gr.addColorStop(0, theme === "day" ? "#4ade80" : "#1e1b4b");
+  gr.addColorStop(1, theme === "day" ? "#16a34a" : "#0f172a");
+  ctx.fillStyle = gr;
+  ctx.fillRect(0, canvas.height - 40, canvas.width, 40);
+}
+
+// ─── HUD HELPERS ──────────────────────────────────────────────
+function glassBox(x, y, w, h, radius = 14) {
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, radius);
+  ctx.fillStyle = "rgba(15,15,40,0.55)";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.15)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+}
+
+function drawHUD() {
+  // Left stats panel
+  const panelW = 190, panelH = 120;
+  glassBox(16, 16, panelW, panelH);
+
+  ctx.fillStyle = "#f8fafc";
+  ctx.font = "bold 28px 'Orbitron', sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText(score, 34, 55);
+
+  ctx.font = "12px 'Rajdhani', sans-serif";
+  ctx.fillStyle = "rgba(255,255,255,0.55)";
+  ctx.fillText("SCORE", 34, 68);
+
+  ctx.fillStyle = "#fbbf24";
+  ctx.font = "bold 20px 'Orbitron', sans-serif";
+  ctx.fillText(`✦ ${coins}`, 34, 96);
+
+  ctx.font = "11px 'Rajdhani', sans-serif";
+  ctx.fillStyle = "rgba(255,255,255,0.45)";
+  ctx.fillText(`${Math.floor(distanceTraveled)}m`, 130, 96);
+
+  // Combo badge
+  if (combo > 2) {
+    const cx = 16, cy = 148;
+    glassBox(cx, cy, 130, 36, 10);
+    const hue = combo > 8 ? "#f87171" : "#4ade80";
+    ctx.fillStyle = hue;
+    ctx.font = `bold 18px 'Orbitron', sans-serif`;
+    ctx.textAlign = "left";
+    ctx.fillText(`×${combo} COMBO`, cx + 12, cy + 24);
+  }
+
+  // Power-up bar (top right)
+  if (ball.powerUp) {
+    const pw = 180, ph = 42;
+    const px = canvas.width - pw - 16;
+    glassBox(px, 16, pw, ph, 12);
+
+    const colors = { shield: "#34d399", magnet: "#fbbf24", speed: "#f87171" };
+    const icons  = { shield: "🛡", magnet: "🧲", speed: "⚡" };
+    ctx.fillStyle = colors[ball.powerUp];
+    ctx.font = "bold 14px 'Orbitron', sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText(`${icons[ball.powerUp]} ${ball.powerUp.toUpperCase()}  ${Math.ceil(ball.powerUpTimer/60)}s`, px + pw - 12, 44);
+
+    // Progress bar
+    const maxTime = ball.powerUp === "speed" ? 200 : 320;
+    const barW = (ball.powerUpTimer / maxTime) * (pw - 24);
+    ctx.fillStyle = "rgba(255,255,255,0.12)";
+    ctx.beginPath(); ctx.roundRect(px + 12, 48, pw - 24, 5, 3); ctx.fill();
+    ctx.fillStyle = colors[ball.powerUp];
+    ctx.beginPath(); ctx.roundRect(px + 12, 48, barW, 5, 3); ctx.fill();
+  }
+
+  // New high score
+  if (score > 0 && score > highScore) {
+    const tw = 220, th = 38;
+    const tx = canvas.width / 2 - tw / 2;
+    glassBox(tx, 16, tw, th, 10);
+    ctx.fillStyle = "#fbbf24";
+    ctx.font = "bold 16px 'Orbitron', sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText("Magic Ball Adventure", canvas.width / 2, canvas.height / 2 - 100);
-    
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "28px 'Poppins', sans-serif";
-    ctx.fillText("Click or Press Space to Start", canvas.width / 2, canvas.height / 2 - 10);
-    
-    ctx.font = "22px 'Poppins', sans-serif";
-    ctx.fillText("Collect coins and power-ups!", canvas.width / 2, canvas.height / 2 + 40);
-    
-    // Power-up instructions with icons
-    ctx.font = "20px 'Poppins', sans-serif";
-    ctx.fillText("🛡️ Shield: Invincibility", canvas.width / 2, canvas.height / 2 + 80);
-    ctx.fillText("🧲 Magnet: Attract Coins", canvas.width / 2, canvas.height / 2 + 110);
-    ctx.fillText("⚡ Speed: Slow Motion", canvas.width / 2, canvas.height / 2 + 140);
-    
-    // High score
-    ctx.fillStyle = "#FFD700";
-    ctx.font = "bold 24px 'Poppins', sans-serif";
-    ctx.fillText(`High Score: ${highScore}`, canvas.width / 2, canvas.height / 2 + 190);
-    
-    // Developer credit
-    ctx.fillStyle = "rgba(255,255,255,0.7)";
-    ctx.font = "18px 'Poppins', sans-serif";
-    ctx.fillText("Developed by Sathwik Rai", canvas.width / 2, canvas.height - 50);
-    
-    // Draw animated sample ball
-    ball.x = canvas.width / 2;
-    ball.y = canvas.height / 2 - 200;
-    ball.rotation = frames * 0.02;
-    ball.draw();
-    
-    frames++;
-    requestAnimationFrame(loop);
-    return;
+    ctx.fillText("★ NEW HIGH SCORE ★", canvas.width / 2, 41);
   }
 
-  // Update distance
-  distanceTraveled += pipeSpeed / 60;
-  
-  // Add pipes & collectibles
-  if (frames % 100 === 0) {
-    addPipe();
-    addRandomCoin();
-  }
+  // Dev credit
+  ctx.fillStyle = "rgba(255,255,255,0.35)";
+  ctx.font = "12px 'Rajdhani', sans-serif";
+  ctx.textAlign = "right";
+  ctx.fillText("Developed by Sathwik Rai", canvas.width - 16, canvas.height - 50);
+  ctx.textAlign = "left";
+}
 
-  // Adjust speed based on power-up
-  const currentPipeSpeed = ball.powerUp === "speed" ? pipeSpeed * 0.6 : pipeSpeed;
-
-  // Move & draw pipes
+// ─── DRAW PIPES ───────────────────────────────────────────────
+function drawPipes(currentSpeed) {
   for (let i = pipes.length - 1; i >= 0; i--) {
     const p = pipes[i];
-    p.x -= currentPipeSpeed;
+    p.x -= currentSpeed;
 
-    // Pipe gradient with better colors
-    const pipeGradient = ctx.createLinearGradient(p.x, 0, p.x + pipeWidth, 0);
+    const pg = ctx.createLinearGradient(p.x, 0, p.x + PIPE_WIDTH, 0);
     if (theme === "day") {
-      pipeGradient.addColorStop(0, "#2E8B57");
-      pipeGradient.addColorStop(0.5, "#32CD32");
-      pipeGradient.addColorStop(1, "#228B22");
+      pg.addColorStop(0, "#166534"); pg.addColorStop(0.45, "#16a34a"); pg.addColorStop(1, "#166534");
     } else {
-      pipeGradient.addColorStop(0, "#4A5568");
-      pipeGradient.addColorStop(0.5, "#718096");
-      pipeGradient.addColorStop(1, "#2D3748");
+      pg.addColorStop(0, "#3730a3"); pg.addColorStop(0.45, "#4f46e5"); pg.addColorStop(1, "#3730a3");
     }
-    ctx.fillStyle = pipeGradient;
+    ctx.fillStyle = pg;
+    ctx.fillRect(p.x, 0, PIPE_WIDTH, p.top);
+    ctx.fillRect(p.x, p.bottom, PIPE_WIDTH, canvas.height - p.bottom);
 
-    // Draw pipes with rounded tops
-    ctx.fillRect(p.x, 0, pipeWidth, p.top);
-    ctx.fillRect(p.x, p.bottom, pipeWidth, canvas.height - p.bottom);
-    
-    // Pipe caps
-    ctx.fillStyle = theme === "day" ? "#228B22" : "#2D3748";
-    ctx.fillRect(p.x - 5, p.top - 20, pipeWidth + 10, 20);
-    ctx.fillRect(p.x - 5, p.bottom, pipeWidth + 10, 20);
+    // Pipe cap
+    const capColor = theme === "day" ? "#15803d" : "#4338ca";
+    ctx.fillStyle = capColor;
+    const capH = 22, capExtra = 8;
+    ctx.beginPath();
+    ctx.roundRect(p.x - capExtra, p.top - capH, PIPE_WIDTH + capExtra * 2, capH, [0, 0, 6, 6]);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.roundRect(p.x - capExtra, p.bottom, PIPE_WIDTH + capExtra * 2, capH, [6, 6, 0, 0]);
+    ctx.fill();
 
-    // Collision detection (ignore if shield is active)
+    // Highlight stripe
+    ctx.fillStyle = "rgba(255,255,255,0.12)";
+    ctx.fillRect(p.x + 10, 0, 8, p.top);
+    ctx.fillRect(p.x + 10, p.bottom, 8, canvas.height - p.bottom);
+
+    // Collision
     if (!ball.powerUp || ball.powerUp !== "shield") {
       if (
         ball.x + ball.radius > p.x &&
-        ball.x - ball.radius < p.x + pipeWidth &&
+        ball.x - ball.radius < p.x + PIPE_WIDTH &&
         (ball.y - ball.radius < p.top || ball.y + ball.radius > p.bottom)
       ) {
-        handleGameOver();
-        return;
+        handleGameOver(); return;
       }
     }
 
-    // Score when pipe passed
-    if (!p.passed && p.x + pipeWidth < ball.x) {
+    // Score
+    if (!p.passed && p.x + PIPE_WIDTH < ball.x) {
       score++;
       combo++;
       maxCombo = Math.max(maxCombo, combo);
       p.passed = true;
-      if (score % 30 === 0) toggleTheme();
-      
-      // Increase difficulty every 10 pipes
-      if (score % 10 === 0) {
-        pipeSpeed += 0.2;
-      }
+      spawnScoreFloat(ball.x, ball.y - 30);
+      if (score % 30 === 0) theme = theme === "day" ? "night" : "day";
+      if (score % SPEED_UP_EVERY === 0) pipeSpeed += SPEED_INCREMENT;
     }
 
-    if (p.x + pipeWidth < 0) pipes.splice(i, 1);
+    if (p.x + PIPE_WIDTH < 0) pipes.splice(i, 1);
+  }
+}
+
+// Floating score text
+const scoreFloats = [];
+function spawnScoreFloat(x, y) {
+  scoreFloats.push({ x, y, life: 50, text: `+1` });
+}
+
+function updateScoreFloats() {
+  for (let i = scoreFloats.length - 1; i >= 0; i--) {
+    const sf = scoreFloats[i];
+    sf.y -= 1.2;
+    sf.life--;
+    ctx.globalAlpha = sf.life / 50;
+    ctx.fillStyle = "#fbbf24";
+    ctx.font = "bold 22px 'Orbitron', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(sf.text, sf.x, sf.y);
+    if (sf.life <= 0) scoreFloats.splice(i, 1);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ─── GAME LOOP ────────────────────────────────────────────────
+function loop() {
+  // Screen shake
+  ctx.save();
+  if (screenShake > 0) {
+    ctx.translate((Math.random() - 0.5) * screenShake, (Math.random() - 0.5) * screenShake);
+    screenShake *= 0.75;
+    if (screenShake < 0.5) screenShake = 0;
   }
 
-  // Move & draw coins with magnet effect
+  ctx.clearRect(-10, -10, canvas.width + 20, canvas.height + 20);
+  drawBackground();
+
+  // Sparkles
+  for (let i = sparkles.length - 1; i >= 0; i--) {
+    const s = sparkles[i];
+    s.x += s.speedX; s.y += s.speedY; s.life--; s.size *= 0.94;
+    ctx.globalAlpha = s.life / 45;
+    ctx.fillStyle = s.color;
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2); ctx.fill();
+    if (s.life <= 0) sparkles.splice(i, 1);
+  }
+  ctx.globalAlpha = 1;
+
+  // ── MENU SCREEN ──────────────────────────────────────────────
+  if (!gameStarted) {
+    drawMenuScreen();
+    frames++;
+    ctx.restore();
+    requestAnimationFrame(loop);
+    return;
+  }
+
+  distanceTraveled += pipeSpeed / 60;
+
+  if (frames % PIPE_SPAWN_RATE === 0) { addPipe(); addRandomCoin(); }
+
+  const currentSpeed = ball.powerUp === "speed" ? pipeSpeed * 0.55 : pipeSpeed;
+
+  drawPipes(currentSpeed);
+
+  // Coins
   for (let i = coinsArray.length - 1; i >= 0; i--) {
     const coin = coinsArray[i];
     if (coin.collected) continue;
-
-    // Magnet effect
     if (ball.powerUp === "magnet") {
-      const dx = ball.x - coin.x;
-      const dy = ball.y - coin.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      if (distance < 200) {
-        coin.x += dx * 0.15;
-        coin.y += dy * 0.15;
-      }
+      const dx = ball.x - coin.x, dy = ball.y - coin.y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist < 200) { coin.x += dx * 0.14; coin.y += dy * 0.14; }
+      else coin.x -= currentSpeed;
     } else {
-      coin.x -= currentPipeSpeed;
+      coin.x -= currentSpeed;
     }
-
-    drawEnhancedCoin(coin);
-
-    // Collision check
-    const dx = ball.x - coin.x;
-    const dy = ball.y - coin.y;
-    if (Math.sqrt(dx * dx + dy * dy) < ball.radius + 14) {
-      coin.collected = true;
-      coins++;
-      combo++;
+    drawCoin(coin);
+    const dx = ball.x - coin.x, dy = ball.y - coin.y;
+    if (Math.sqrt(dx*dx + dy*dy) < ball.radius + 13) {
+      coin.collected = true; coins++; combo++;
       maxCombo = Math.max(maxCombo, combo);
-      coinSound.currentTime = 0;
-      coinSound.play();
-      createSparkle(coin.x, coin.y, "#FFD700");
-      coinsArray.splice(i, 1);
-      continue;
+      try { coinSound.currentTime = 0; coinSound.play(); } catch(e){}
+      createSparkle(coin.x, coin.y, "#fbbf24");
+      coinsArray.splice(i, 1); continue;
     }
-
     if (coin.x + 20 < 0) coinsArray.splice(i, 1);
   }
 
-  // Move & draw power-ups
+  // Power-ups
   for (let i = powerUpsArray.length - 1; i >= 0; i--) {
-    const powerUp = powerUpsArray[i];
-    if (powerUp.collected) continue;
-
-    powerUp.x -= currentPipeSpeed;
-    drawPowerUp(powerUp);
-
-    // Collision check
-    const dx = ball.x - powerUp.x;
-    const dy = ball.y - powerUp.y;
-    if (Math.sqrt(dx * dx + dy * dy) < ball.radius + 16) {
-      powerUp.collected = true;
-      ball.activatePowerUp(powerUp.type);
-      createSparkle(powerUp.x, powerUp.y, 
-        powerUp.type === "shield" ? "#00ff88" : 
-        powerUp.type === "magnet" ? "#ffaa00" : "#ff4444");
-      combo++;
-      maxCombo = Math.max(maxCombo, combo);
-      powerUpsArray.splice(i, 1);
-      continue;
+    const pu = powerUpsArray[i];
+    if (pu.collected) continue;
+    pu.x -= currentSpeed;
+    drawPowerUp(pu);
+    const dx = ball.x - pu.x, dy = ball.y - pu.y;
+    if (Math.sqrt(dx*dx + dy*dy) < ball.radius + 16) {
+      pu.collected = true;
+      ball.activatePowerUp(pu.type);
+      const c = pu.type === "shield" ? "#34d399" : pu.type === "magnet" ? "#fbbf24" : "#f87171";
+      createSparkle(pu.x, pu.y, c);
+      combo++; maxCombo = Math.max(maxCombo, combo);
+      powerUpsArray.splice(i, 1); continue;
     }
-
-    if (powerUp.x + 20 < 0) powerUpsArray.splice(i, 1);
+    if (pu.x + 20 < 0) powerUpsArray.splice(i, 1);
   }
 
-  // Ball
   ball.update();
   ball.draw();
 
-  // Ground hit (ignore if shield is active)
+  // Ground collision
   if (!ball.powerUp || ball.powerUp !== "shield") {
-    if (ball.y + ball.radius > canvas.height) {
-      handleGameOver();
-      return;
-    }
+    if (ball.y + ball.radius > canvas.height - 40) { handleGameOver(); return; }
+    if (ball.y - ball.radius < 0) { ball.velocity = 1; ball.y = ball.radius + 1; }
   }
 
-  // --- Enhanced UI with Better Visibility ---
-  ctx.textAlign = "left";
-  
-  // Score with background for better visibility
-  ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
-  ctx.fillRect(15, 15, 200, 140);
-  
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 32px 'Poppins', sans-serif";
-  ctx.fillText(`SCORE: ${score}`, 30, 50);
-
-  ctx.font = "26px 'Poppins', sans-serif";
-  ctx.fillStyle = "#FFD700";
-  ctx.fillText(`COINS: ${coins}`, 30, 85);
-  
-  // Distance traveled
-  ctx.fillStyle = "#4fc3f7";
-  ctx.fillText(`DIST: ${Math.floor(distanceTraveled)}m`, 30, 120);
-  
-  // Combo system with background
-  if (combo > 1) {
-    ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
-    ctx.fillRect(15, 145, 120, 40);
-    
-    ctx.fillStyle = combo > 5 ? "#ff4444" : "#44ff44";
-    ctx.font = "bold 24px 'Poppins', sans-serif";
-    ctx.fillText(`COMBO x${combo}`, 30, 170);
-  }
-  
-  // Power-up timer with background
-  if (ball.powerUp) {
-    const timeLeft = Math.ceil(ball.powerUpTimer / 60);
-    ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
-    ctx.fillRect(canvas.width - 170, 15, 155, 40);
-    
-    ctx.fillStyle = ball.powerUp === "shield" ? "#00ff88" : 
-                   ball.powerUp === "magnet" ? "#ffaa00" : "#ff4444";
-    ctx.font = "bold 20px 'Poppins', sans-serif";
-    ctx.textAlign = "right";
-    ctx.fillText(`${ball.powerUp.toUpperCase()} ${timeLeft}s`, canvas.width - 20, 40);
-    ctx.textAlign = "left";
-  }
-
-  // High score indicator
-  if (score > highScore) {
-    ctx.fillStyle = "rgba(255, 215, 0, 0.3)";
-    ctx.fillRect(canvas.width / 2 - 100, 15, 200, 40);
-    ctx.fillStyle = "#FFD700";
-    ctx.font = "bold 24px 'Poppins', sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("NEW HIGH SCORE!", canvas.width / 2, 40);
-    ctx.textAlign = "left";
-  }
-
-  // Developer credit during gameplay
-  ctx.fillStyle = "rgba(255,255,255,0.6)";
-  ctx.font = "16px 'Poppins', sans-serif";
-  ctx.textAlign = "right";
-  ctx.fillText("Developed by Sathwik Rai", canvas.width - 20, canvas.height - 20);
-  ctx.textAlign = "left";
+  updateScoreFloats();
+  drawHUD();
 
   frames++;
+  ctx.restore();
   if (!gameOver) requestAnimationFrame(loop);
 }
 
-function handleGameOver() {
-  gameOver = true;
-  
-  // Select a random motivational message
-  currentMotivationalMessage = motivationalMessages[Math.floor(Math.random() * motivationalMessages.length)];
-  
-  // Update high score
-  if (score > highScore) {
-    highScore = score;
-    localStorage.setItem('flappyHighScore', highScore);
+// ─── MENU SCREEN ──────────────────────────────────────────────
+function drawMenuScreen() {
+  // Dim overlay
+  ctx.fillStyle = "rgba(5,5,20,0.72)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+
+  // Title card
+  const cardW = Math.min(520, canvas.width - 40);
+  const cardH = 380;
+  const cardX = cx - cardW / 2;
+  const cardY = cy - cardH / 2 - 20;
+
+  // Card glass
+  ctx.beginPath();
+  ctx.roundRect(cardX, cardY, cardW, cardH, 24);
+  ctx.fillStyle = "rgba(15,15,50,0.75)";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(167,139,250,0.4)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Animated title
+  const titleGrad = ctx.createLinearGradient(cardX, 0, cardX + cardW, 0);
+  titleGrad.addColorStop(0, "#60a5fa");
+  titleGrad.addColorStop(0.5, "#e879f9");
+  titleGrad.addColorStop(1, "#fbbf24");
+  ctx.fillStyle = titleGrad;
+  ctx.font = `bold ${Math.min(42, canvas.width * 0.06)}px 'Orbitron', sans-serif`;
+  ctx.textAlign = "center";
+  ctx.fillText("MAGIC BALL", cx, cardY + 62);
+  ctx.font = `bold ${Math.min(28, canvas.width * 0.04)}px 'Orbitron', sans-serif`;
+  ctx.fillStyle = "rgba(255,255,255,0.75)";
+  ctx.fillText("ADVENTURE", cx, cardY + 96);
+
+  // Divider
+  ctx.strokeStyle = "rgba(167,139,250,0.3)";
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(cardX + 30, cardY + 112); ctx.lineTo(cardX + cardW - 30, cardY + 112); ctx.stroke();
+
+  // Power-up legend
+  const items = [["🛡", "SHIELD", "#34d399", "Invincibility"], ["🧲", "MAGNET", "#fbbf24", "Attract coins"], ["⚡", "SPEED", "#f87171", "Slow motion"]];
+  items.forEach(([icon, label, color, desc], idx) => {
+    const iy = cardY + 140 + idx * 52;
+    const ix = cx - 150;
+    glassBox(ix, iy, 300, 40, 10);
+    ctx.fillStyle = color;
+    ctx.font = "bold 15px 'Orbitron', sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(`${icon}  ${label}`, ix + 16, iy + 26);
+    ctx.fillStyle = "rgba(255,255,255,0.5)";
+    ctx.font = "13px 'Rajdhani', sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText(desc, ix + 284, iy + 26);
+  });
+
+  // High score
+  if (highScore > 0) {
+    ctx.fillStyle = "#fbbf24";
+    ctx.font = "bold 17px 'Orbitron', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(`★  BEST: ${highScore}`, cx, cardY + 320);
   }
-  
-  // Stop BGM and play game over sound
-  bgm.pause();
-  bgm.currentTime = 0;
-  hitSound.play();
-  
-  // Play game over sound after a delay
-  setTimeout(() => {
-    gameOverSound.play();
-  }, 500);
-  
-  // Show game over screen
+
+  // Pulsing start button
+  const btnPulse = Math.sin(frames * 0.07) * 0.12 + 0.88;
+  const btnW = 230, btnH = 52;
+  const btnX = cx - btnW / 2, btnY = cardY + cardH + 18;
+  ctx.save();
+  ctx.translate(cx, btnY + btnH / 2);
+  ctx.scale(btnPulse, btnPulse);
+  ctx.translate(-cx, -(btnY + btnH / 2));
+
+  const btnGrad = ctx.createLinearGradient(btnX, 0, btnX + btnW, 0);
+  btnGrad.addColorStop(0, "#7c3aed"); btnGrad.addColorStop(1, "#a21caf");
+  ctx.beginPath(); ctx.roundRect(btnX, btnY, btnW, btnH, 14);
+  ctx.fillStyle = btnGrad;
+  ctx.shadowColor = "#a78bfa"; ctx.shadowBlur = 18;
+  ctx.fill(); ctx.shadowBlur = 0;
+
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 18px 'Orbitron', sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("▶  PLAY NOW", cx, btnY + 33);
+  ctx.restore();
+
+  // Animated demo ball
+  ball.x = cx;
+  ball.y = cardY - 50 + Math.sin(frames * 0.04) * 18;
+  ball.rotation = frames * 0.025;
+  ball.draw();
+
+  // Dev credit
+  ctx.fillStyle = "rgba(255,255,255,0.3)";
+  ctx.font = "12px 'Rajdhani', sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("Developed by Sathwik Rai", cx, canvas.height - 22);
+}
+
+// ─── GAME OVER ────────────────────────────────────────────────
+function handleGameOver() {
+  if (gameOver) return;
+  gameOver = true;
+  screenShake = 12;
+  currentMotivationalMessage = motivationalMessages[Math.floor(Math.random() * motivationalMessages.length)];
+  if (score > highScore) { highScore = score; localStorage.setItem('flappyHighScore', highScore); }
+  try { bgm.pause(); bgm.currentTime = 0; hitSound.play(); } catch(e){}
+  setTimeout(() => { try { gameOverSound.play(); } catch(e){} }, 400);
   showGameOverScreen();
 }
 
 function showGameOverScreen() {
-  ctx.fillStyle = "rgba(0,0,0,0.85)";
+  // Dim background (keep drawing)
+  ctx.fillStyle = "rgba(0,0,0,0.80)";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 56px 'Poppins', sans-serif";
+
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+  const cardW = Math.min(500, canvas.width - 40);
+  const cardH = 420;
+  const cardX = cx - cardW / 2;
+  const cardY = cy - cardH / 2;
+
+  // Card
+  ctx.beginPath(); ctx.roundRect(cardX, cardY, cardW, cardH, 24);
+  ctx.fillStyle = "rgba(12,10,35,0.92)"; ctx.fill();
+  ctx.strokeStyle = "rgba(248,113,113,0.45)"; ctx.lineWidth = 2; ctx.stroke();
+
+  // "GAME OVER" heading
+  ctx.font = `bold ${Math.min(52, canvas.width * 0.07)}px 'Orbitron', sans-serif`;
   ctx.textAlign = "center";
-  ctx.fillText("Game Over", canvas.width / 2, canvas.height / 2 - 120);
-  
-  // Display the motivational message
-  ctx.font = "italic 24px 'Poppins', sans-serif";
-  ctx.fillStyle = "#FFD700";
-  ctx.fillText(currentMotivationalMessage, canvas.width / 2, canvas.height / 2 - 60);
-  
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "28px 'Poppins', sans-serif";
-  ctx.fillText(`Final Score: ${score}`, canvas.width / 2, canvas.height / 2 - 10);
-  ctx.fillText(`Coins Collected: ${coins}`, canvas.width / 2, canvas.height / 2 + 30);
-  ctx.fillText(`Max Combo: ${maxCombo}`, canvas.width / 2, canvas.height / 2 + 70);
-  ctx.fillText(`Distance: ${Math.floor(distanceTraveled)}m`, canvas.width / 2, canvas.height / 2 + 110);
-  ctx.fillText(`High Score: ${highScore}`, canvas.width / 2, canvas.height / 2 + 150);
-  
-  ctx.fillStyle = "#4fc3f7";
-  ctx.font = "24px 'Poppins', sans-serif";
-  ctx.fillText("Click or Press Space to Play Again", canvas.width / 2, canvas.height / 2 + 200);
-  
-  ctx.fillStyle = "rgba(255,255,255,0.7)";
-  ctx.font = "18px 'Poppins', sans-serif";
-  ctx.fillText("Developed by Sathwik Rai", canvas.width / 2, canvas.height - 40);
+  const goGrad = ctx.createLinearGradient(cx - 150, 0, cx + 150, 0);
+  goGrad.addColorStop(0, "#f87171"); goGrad.addColorStop(1, "#fbbf24");
+  ctx.fillStyle = goGrad;
+  ctx.fillText("GAME OVER", cx, cardY + 65);
+
+  // Motivational
+  ctx.font = `italic 16px 'Rajdhani', sans-serif`;
+  ctx.fillStyle = "rgba(255,255,255,0.65)";
+  ctx.fillText(currentMotivationalMessage, cx, cardY + 98);
+
+  // Divider
+  ctx.strokeStyle = "rgba(248,113,113,0.25)"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(cardX + 30, cardY + 116); ctx.lineTo(cardX + cardW - 30, cardY + 116); ctx.stroke();
+
+  // Stats grid
+  const stats = [
+    ["SCORE", score, "#f8fafc"],
+    ["HIGH SCORE", highScore, "#fbbf24"],
+    ["COINS", coins, "#fbbf24"],
+    ["MAX COMBO", `×${maxCombo}`, "#4ade80"],
+    ["DISTANCE", `${Math.floor(distanceTraveled)}m`, "#60a5fa"],
+  ];
+
+  stats.forEach(([label, val, color], i) => {
+    const row = Math.floor(i / 2);
+    const col = i % 2;
+    const sx = cardX + 30 + col * (cardW / 2 - 10);
+    const sy = cardY + 140 + row * 72;
+    const sw = cardW / 2 - 40;
+
+    glassBox(sx, sy, sw, 56, 10);
+    ctx.fillStyle = color;
+    ctx.font = `bold 22px 'Orbitron', sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText(val, sx + sw / 2, sy + 34);
+    ctx.fillStyle = "rgba(255,255,255,0.4)";
+    ctx.font = "11px 'Rajdhani', sans-serif";
+    ctx.fillText(label, sx + sw / 2, sy + 49);
+  });
+
+  // Restart button
+  const btnW = 230, btnH = 52;
+  const btnX = cx - btnW / 2, btnY = cardY + cardH - 70;
+  const btnGrad = ctx.createLinearGradient(btnX, 0, btnX + btnW, 0);
+  btnGrad.addColorStop(0, "#7c3aed"); btnGrad.addColorStop(1, "#a21caf");
+  ctx.beginPath(); ctx.roundRect(btnX, btnY, btnW, btnH, 14);
+  ctx.fillStyle = btnGrad;
+  ctx.shadowColor = "#a78bfa"; ctx.shadowBlur = 16;
+  ctx.fill(); ctx.shadowBlur = 0;
+
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 16px 'Orbitron', sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("↩  PLAY AGAIN", cx, btnY + 33);
+
+  // Dev credit
+  ctx.fillStyle = "rgba(255,255,255,0.3)";
+  ctx.font = "12px 'Rajdhani', sans-serif";
+  ctx.fillText("Developed by Sathwik Rai", cx, canvas.height - 22);
 }
 
-// --- Input ---
-function startGame() {
+// ─── INPUT ────────────────────────────────────────────────────
+function startOrFlap() {
   if (!gameStarted) {
     gameStarted = true;
-    bgm.play().catch(() => {});
+    ball.x = 110; ball.y = canvas.height / 2; ball.velocity = 0;
+    try { bgm.play(); } catch(e){}
     return;
   }
-  if (gameOver) {
-    location.reload();
-  } else {
-    ball.flap();
-  }
+  if (gameOver) { location.reload(); return; }
+  ball.flap();
 }
 
-canvas.addEventListener("click", startGame);
-
+canvas.addEventListener("click", startOrFlap);
+canvas.addEventListener("touchstart", (e) => { e.preventDefault(); startOrFlap(); }, { passive: false });
 document.addEventListener("keydown", (e) => {
-  if (["Space", "ArrowUp", "Enter"].includes(e.code)) {
-    if (!gameStarted) {
-      bgm.play().catch(() => {});
-      gameStarted = true;
-    } else if (gameOver) {
-      location.reload();
-    } else {
-      ball.flap();
-    }
-  }
+  if (["Space", "ArrowUp", "Enter"].includes(e.code)) { e.preventDefault(); startOrFlap(); }
 });
 
-// Start with menu
+// Custom cursor tracking
+document.addEventListener("mousemove", (e) => {
+  const el = document.querySelector("body::after");
+});
+
+// ─── KICK OFF ─────────────────────────────────────────────────
 loop();
