@@ -578,16 +578,52 @@ function drawSkinSelect(){
 
 // ── SCREEN 3 — GAME OVER ─────────────────────────────────────
 function drawGameOver(){
-  // dark overlay over the frozen game
+  // dark overlay
   ctx.fillStyle="rgba(0,0,0,0.75)";
   ctx.fillRect(0,0,canvas.width,canvas.height);
 
   const cx=canvas.width/2, cy=canvas.height/2;
   const W=Math.min(420,canvas.width-32);
-  const H=Math.min(490,canvas.height-40);
+  const H=Math.min(510,canvas.height-30);
   const X=cx-W/2, Y=cy-H/2;
 
-  drawCard(X,Y,W,H,"#dc2626","#f97316","rgba(248,113,113,0.6)");
+  // ── Animated neon border (colour cycles through hues) ──────
+  const hue = (frames*1.8) % 360;
+  const neonCol  = `hsl(${hue},100%,60%)`;
+  const neonCol2 = `hsl(${(hue+120)%360},100%,60%)`;
+  const neonCol3 = `hsl(${(hue+240)%360},100%,60%)`;
+
+  // outer glow layers (3 passes, decreasing size)
+  [14,9,4].forEach((blur,i)=>{
+    ctx.save();
+    ctx.shadowColor = `hsl(${(hue+i*40)%360},100%,60%)`;
+    ctx.shadowBlur  = blur;
+    ctx.strokeStyle = neonCol;
+    ctx.lineWidth   = 2.5 - i*0.5;
+    ctx.beginPath(); ctx.roundRect(X,Y,W,H,18); ctx.stroke();
+    ctx.restore();
+  });
+
+  // card body
+  ctx.fillStyle="rgba(8,4,30,0.97)";
+  ctx.beginPath(); ctx.roundRect(X,Y,W,H,18); ctx.fill();
+
+  // animated neon top stripe
+  const bar=ctx.createLinearGradient(X,Y,X+W,Y);
+  bar.addColorStop(0, neonCol);
+  bar.addColorStop(0.5, neonCol2);
+  bar.addColorStop(1, neonCol3);
+  ctx.fillStyle=bar;
+  ctx.beginPath(); ctx.roundRect(X,Y,W,5,[18,18,0,0]); ctx.fill();
+
+  // animated border stroke on top of everything
+  const borderG=ctx.createLinearGradient(X,Y,X+W,Y+H);
+  borderG.addColorStop(0,   neonCol);
+  borderG.addColorStop(0.33,neonCol2);
+  borderG.addColorStop(0.66,neonCol3);
+  borderG.addColorStop(1,   neonCol);
+  ctx.strokeStyle=borderG; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.roundRect(X,Y,W,H,18); ctx.stroke();
 
   // GAME OVER title
   const hg=ctx.createLinearGradient(cx-120,0,cx+120,0);
@@ -595,7 +631,7 @@ function drawGameOver(){
   ctx.fillStyle=hg; ctx.font=F_BIG; ctx.textAlign="center";
   ctx.fillText("GAME OVER", cx, Y+62);
 
-  // motivational message in its own highlighted box
+  // motivational message box
   ctx.fillStyle="rgba(251,191,36,0.12)";
   ctx.beginPath(); ctx.roundRect(X+14,Y+70,W-28,40,9); ctx.fill();
   ctx.strokeStyle="rgba(251,191,36,0.4)"; ctx.lineWidth=1;
@@ -611,11 +647,11 @@ function drawGameOver(){
 
   // stats grid — 2 columns
   const stats=[
-    ["FINAL SCORE", score,                 "#ffffff"],
-    ["HIGH SCORE",  highScore,             "#fbbf24"],
-    ["COINS",       coins,                 "#fbbf24"],
-    ["MAX COMBO",   "×"+maxCombo,          "#4ade80"],
-    ["DISTANCE",    Math.floor(dist)+"m",  "#7dd3fc"],
+    ["FINAL SCORE", score,                "#ffffff"],
+    ["HIGH SCORE",  highScore,            "#fbbf24"],
+    ["COINS",       coins,                "#fbbf24"],
+    ["MAX COMBO",   "×"+maxCombo,         "#4ade80"],
+    ["DISTANCE",    Math.floor(dist)+"m", "#7dd3fc"],
   ];
   const SW=Math.floor((W-32)/2), SH=56, SG=7;
   stats.forEach(([lbl,val,col],i)=>{
@@ -631,18 +667,21 @@ function drawGameOver(){
     ctx.fillText(lbl, sx+SW/2, sy+SH*0.84);
   });
 
-  // play again button + hint
+  // play again button
+  pulseBtn(cx, Y+H-96, 210, 44, "↩  PLAY AGAIN", "#7c3aed", "#a21caf");
+
+  // hint text — spaced well below button
   const canRestart = Date.now()-deadAt > 1500;
-  pulseBtn(cx, Y+H-58, 210, 44, "↩  PLAY AGAIN", "#7c3aed", "#a21caf");
-  ctx.fillStyle = canRestart ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.3)";
+  ctx.fillStyle = canRestart ? "rgba(255,255,255,0.65)" : "rgba(255,255,255,0.3)";
   ctx.font=F_TINY; ctx.textAlign="center";
   ctx.fillText(
     canRestart ? "Tap  /  Click  /  Space  to restart" : "Wait a moment...",
-    cx, Y+H-8
+    cx, Y+H-42
   );
 
-  ctx.fillStyle="rgba(255,255,255,0.2)"; ctx.font=F_TINY; ctx.textAlign="center";
-  ctx.fillText("Developed by Sathwik Rai", cx, canvas.height-10);
+  // dev credit — inside card, always visible on all screen sizes
+  ctx.fillStyle="rgba(255,255,255,0.35)"; ctx.font=F_TINY; ctx.textAlign="center";
+  ctx.fillText("Developed by Sathwik Rai", cx, Y+H-18);
 }
 
 // ── Game start ───────────────────────────────────────────────
