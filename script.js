@@ -20,16 +20,16 @@ const F_SMALL  = "bold 16px Nunito,sans-serif";
 const F_TINY   = "13px Nunito,sans-serif";
 const F_SCORE  = "bold 34px 'Fredoka One',cursive";
 
-// ── Difficulty ───────────────────────────────────────────────
-const GRAVITY   = 0.16;
-const JUMP_V    = -5.0;
-const GAP       = 190;
-const PW        = 70;
-const SPAWN     = 130;
-let   SPEED     = 2.0;
-const SPEED_INC = 0.10;
-const SPEED_MAX = 4.5;
-const RAMP_AT   = 15;
+// ── Difficulty (VERY EASY) ───────────────────────────────────
+const GRAVITY   = 0.10;   // very floaty
+const JUMP_V    = -4.2;   // gentle lift
+const GAP       = 240;    // very wide gap
+const PW        = 65;
+const SPAWN     = 160;    // long wait between pipes
+let   SPEED     = 1.5;    // slow start
+const SPEED_INC = 0.06;   // tiny ramp
+const SPEED_MAX = 3.2;    // low cap
+const RAMP_AT   = 20;     // ramp up rarely
 
 // ── State: 0=HowToPlay 1=SkinSelect 2=Playing 3=Dead ────────
 let STATE = 0;
@@ -525,52 +525,63 @@ function drawSkinSelect(){
 
 // ── SCREEN 3: DEAD ───────────────────────────────────────────
 function drawDead(){
-  ctx.fillStyle="rgba(0,0,8,.82)"; ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle="rgba(0,0,8,.85)"; ctx.fillRect(0,0,canvas.width,canvas.height);
   const cx=canvas.width/2, cy=canvas.height/2;
   const W=Math.min(420,canvas.width-32);
-  const H=Math.min(420,canvas.height-50);
+  const H=Math.min(500,canvas.height-40);   // taller so nothing clips
   const X=cx-W/2, Y=cy-H/2;
 
   cardBox(X,Y,W,H,"rgba(248,113,113,.6)");
-  // override stripe to red
+  // red top stripe
   const rb=ctx.createLinearGradient(X,Y,X+W,Y);
   rb.addColorStop(0,"#dc2626"); rb.addColorStop(.5,"#f97316"); rb.addColorStop(1,"#dc2626");
   ctx.fillStyle=rb;
   ctx.beginPath(); ctx.roundRect(X,Y,W,5,[18,18,0,0]); ctx.fill();
 
-  const hg=ctx.createLinearGradient(cx-120,0,cx+120,0);
+  // GAME OVER heading
+  const hg=ctx.createLinearGradient(cx-130,0,cx+130,0);
   hg.addColorStop(0,"#f87171"); hg.addColorStop(1,"#fbbf24");
   ctx.fillStyle=hg; ctx.font=F_TITLE; ctx.textAlign="center";
-  ctx.fillText("GAME OVER",cx,Y+60);
+  ctx.fillText("GAME OVER",cx,Y+62);
 
-  ctx.fillStyle="rgba(255,255,255,.5)"; ctx.font="italic "+F_TINY;
-  ctx.fillText(motivMsg,cx,Y+82);
+  // ── Motivational message — bright & prominent ──
+  ctx.fillStyle="rgba(255,255,255,0.06)";
+  ctx.beginPath(); ctx.roundRect(X+14,Y+72,W-28,38,9); ctx.fill();
+  ctx.strokeStyle="rgba(251,191,36,.35)"; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.roundRect(X+14,Y+72,W-28,38,9); ctx.stroke();
+  ctx.fillStyle="#fde68a"; ctx.font="bold italic 15px Nunito,sans-serif";
+  ctx.textAlign="center";
+  ctx.fillText(motivMsg,cx,Y+96);
 
-  ctx.strokeStyle="rgba(248,113,113,.2)"; ctx.lineWidth=1;
-  ctx.beginPath(); ctx.moveTo(X+20,Y+94); ctx.lineTo(X+W-20,Y+94); ctx.stroke();
+  // divider
+  ctx.strokeStyle="rgba(248,113,113,.25)"; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(X+20,Y+118); ctx.lineTo(X+W-20,Y+118); ctx.stroke();
 
-  // stats 2-col
+  // ── Stats 2-col grid ──
   const stats=[
-    ["SCORE",   score,              "#f8fafc"],
-    ["BEST",    highScore,          "#fbbf24"],
-    ["COINS",   coins,              "#fbbf24"],
-    ["COMBO",   "×"+maxCombo,       "#4ade80"],
-    ["DISTANCE",Math.floor(dist)+"m","#7dd3fc"],
+    ["FINAL SCORE", score,                "#ffffff"],
+    ["HIGH SCORE",  highScore,            "#fbbf24"],
+    ["COINS",       coins,                "#fbbf24"],
+    ["MAX COMBO",   "×"+maxCombo,         "#4ade80"],
+    ["DISTANCE",    Math.floor(dist)+"m", "#7dd3fc"],
   ];
-  const SW2=Math.floor((W-32)/2), SH=55, SG=8;
+  const SW2=Math.floor((W-32)/2), SH=58, SG=7;
   stats.forEach(([lbl,val,col],i)=>{
     const c=i%2, r=Math.floor(i/2);
-    const sx=X+10+c*(SW2+12), sy=Y+106+r*(SH+SG);
-    ctx.fillStyle="rgba(255,255,255,.06)";
+    const sx=X+10+c*(SW2+12), sy=Y+128+r*(SH+SG);
+    ctx.fillStyle="rgba(255,255,255,.07)";
     ctx.beginPath(); ctx.roundRect(sx,sy,SW2,SH,9); ctx.fill();
-    ctx.strokeStyle="rgba(255,255,255,.08)"; ctx.lineWidth=1;
+    ctx.strokeStyle="rgba(255,255,255,.1)"; ctx.lineWidth=1;
     ctx.beginPath(); ctx.roundRect(sx,sy,SW2,SH,9); ctx.stroke();
+    // value — big and coloured
     ctx.fillStyle=col; ctx.font=F_MED; ctx.textAlign="center";
-    ctx.fillText(val,sx+SW2/2,sy+SH*.6);
-    ctx.fillStyle="rgba(255,255,255,.38)"; ctx.font=F_TINY;
+    ctx.fillText(val,sx+SW2/2,sy+SH*.58);
+    // label — small and faint below
+    ctx.fillStyle="rgba(255,255,255,.45)"; ctx.font=F_TINY;
     ctx.fillText(lbl,sx+SW2/2,sy+SH*.84);
   });
 
+  // ── Play again button ──
   pulseBtn(cx,Y+H-14,210,46,"↩  PLAY AGAIN","#7c3aed","#a21caf");
 
   ctx.fillStyle="rgba(255,255,255,.2)"; ctx.font=F_TINY; ctx.textAlign="center";
