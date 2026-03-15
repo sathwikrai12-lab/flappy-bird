@@ -593,7 +593,7 @@ function startGame(){
   pipes.length=0; cArr.length=0; pArr.length=0;
   sparks.length=0; floats.length=0;
   score=0; coins=0; combo=0; maxCombo=0; dist=0;
-  SPEED=2.0; theme="day"; STATE=2;
+  SPEED=1.5; theme="day"; STATE=2;
   ball.reset();
   try{ SND.bgm.currentTime=0; SND.bgm.play(); }catch(e){}
 }
@@ -621,7 +621,7 @@ function onTap(px,py){
     startGame(); return;
   }
   if(STATE===2){ ball.flap(); return; }
-  if(STATE===3){ STATE=0; return; }
+  if(STATE===3){ startGame(); return; }
 }
 
 canvas.addEventListener("click",e=>onTap(e.clientX,e.clientY));
@@ -635,7 +635,7 @@ document.addEventListener("keydown",e=>{
     if(STATE===0){STATE=1;return;}
     if(STATE===1){startGame();return;}
     if(STATE===2){ball.flap();return;}
-    if(STATE===3){STATE=0;return;}
+    if(STATE===3){startGame();return;}
   }
 });
 
