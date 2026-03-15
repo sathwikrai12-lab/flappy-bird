@@ -584,6 +584,15 @@ function drawDead(){
   // ── Play again button ──
   pulseBtn(cx,Y+H-14,210,46,"↩  PLAY AGAIN","#7c3aed","#a21caf");
 
+  // show "tap to restart" only after 1.5s so player can read the screen
+  if(Date.now()-deadTime>1500){
+    ctx.fillStyle="rgba(255,255,255,0.6)"; ctx.font=F_TINY; ctx.textAlign="center";
+    ctx.fillText("Tap or press Space to restart",cx,Y+H+18);
+  } else {
+    ctx.fillStyle="rgba(255,255,255,0.3)"; ctx.font=F_TINY; ctx.textAlign="center";
+    ctx.fillText("Reading your results...",cx,Y+H+18);
+  }
+
   ctx.fillStyle="rgba(255,255,255,.2)"; ctx.font=F_TINY; ctx.textAlign="center";
   ctx.fillText("Developed by Sathwik Rai",cx,canvas.height-10);
 }
@@ -598,9 +607,11 @@ function startGame(){
   try{ SND.bgm.currentTime=0; SND.bgm.play(); }catch(e){}
 }
 
+let deadTime=0; // timestamp when we died — prevents instant dismiss
+
 function triggerGameOver(){
   if(STATE===3) return;
-  STATE=3; shake=14;
+  STATE=3; shake=14; deadTime=Date.now();
   motivMsg=MOTIV[Math.floor(Math.random()*MOTIV.length)];
   if(score>highScore){ highScore=score; localStorage.setItem("mba_hi",highScore); }
   try{ SND.bgm.pause(); SND.bgm.currentTime=0; sfx("hit"); }catch(e){}
@@ -621,7 +632,7 @@ function onTap(px,py){
     startGame(); return;
   }
   if(STATE===2){ ball.flap(); return; }
-  if(STATE===3){ startGame(); return; }
+  if(STATE===3){ if(Date.now()-deadTime>1500){ startGame(); } return; }
 }
 
 canvas.addEventListener("click",e=>onTap(e.clientX,e.clientY));
@@ -635,7 +646,7 @@ document.addEventListener("keydown",e=>{
     if(STATE===0){STATE=1;return;}
     if(STATE===1){startGame();return;}
     if(STATE===2){ball.flap();return;}
-    if(STATE===3){startGame();return;}
+    if(STATE===3){ if(Date.now()-deadTime>1500){ startGame(); } return;}
   }
 });
 
