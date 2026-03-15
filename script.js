@@ -1,122 +1,151 @@
-// ============================== 
-// 🎮 Magic Ball Adventure by Sathwik Rai
-// ==============================
+// ============================================================
+//  Magic Ball Adventure  ·  by Sathwik Rai
+// ============================================================
 
+// ── Canvas ──────────────────────────────────────────────────
 const canvas = document.getElementById("gameCanvas");
-const ctx = canvas.getContext("2d");
+const ctx    = canvas.getContext("2d");
 
 function resizeCanvas() {
-  canvas.width = window.innerWidth;
+  canvas.width  = window.innerWidth;
   canvas.height = window.innerHeight;
 }
-window.addEventListener("resize", resizeCanvas);
+window.addEventListener("resize", () => { resizeCanvas(); initBgObjects(); });
 resizeCanvas();
 
-// ─── DIFFICULTY SETTINGS (EASIER) ───────────────────────────
-const GRAVITY         = 0.18;   // was 0.25 — floatier
-const PIPE_GAP        = 210;    // was 160 — wider gap
-const PIPE_WIDTH      = 75;
-const PIPE_SPAWN_RATE = 120;    // was 100 — more time between pipes
-const INIT_PIPE_SPEED = 2.0;    // was 2.5 — slower start
-const SPEED_INCREMENT = 0.12;   // was 0.2 — gentler ramp
-const SPEED_UP_EVERY  = 15;     // was 10 — more forgiving ramp
-const JUMP_VELOCITY   = -5.0;   // was -5.5 — softer jump
+// ── Responsive scale helper ──────────────────────────────────
+// Base design at 480px wide; everything scales from there.
+function sc(n) { return n * (canvas.width / 480); }
 
-// ─── GAME STATE ───────────────────────────────────────────────
-let frames = 0;
-let score = 0;
-let coins = 0;
-let gameOver = false;
-let gameStarted = false;
-let theme = "day";
-let combo = 0;
-let maxCombo = 0;
-let sparkles = [];
-let highScore = parseInt(localStorage.getItem('flappyHighScore')) || 0;
-let distanceTraveled = 0;
-let currentMotivationalMessage = "";
-let screenShake = 0;
-let particles = [];
-let pipeSpeed = INIT_PIPE_SPEED;
+// ── Difficulty (EASY) ───────────────────────────────────────
+const GRAVITY         = 0.15;
+const JUMP_VEL        = -4.6;
+const PIPE_GAP        = () => Math.max(200, canvas.height * 0.30);  // 30 % of screen
+const PIPE_W          = () => Math.max(55, sc(55));
+const PIPE_SPAWN_INT  = 140;   // frames between pipes
+const INIT_SPEED      = 1.8;
+const SPEED_INC       = 0.10;
+const SPEED_UP_EVERY  = 18;    // pipes before speed-up
 
-const motivationalMessages = [
-  "Better luck next time, champ! 💪",
-  "You gave it your best shot! Try again! 🔥",
-  "The sky's the limit — fly again! ☁️",
-  "Don't give up, legend! 🚀",
-  "One more try and you'll beat your record! 💎",
-  "You're getting better every try! ⭐",
-  "The champion in you is waking up! 🏆",
+// ── Game state ──────────────────────────────────────────────
+const STATE = { INSTRUCTIONS: 0, MENU: 1, PLAYING: 2, DEAD: 3 };
+let state         = STATE.INSTRUCTIONS;
+let instrPage     = 0;          // 0 or 1 (two instruction pages)
+let frames        = 0;
+let score         = 0;
+let coins         = 0;
+let gameOver      = false;
+let theme         = "day";
+let combo         = 0;
+let maxCombo      = 0;
+let sparkles      = [];
+let scoreFloats   = [];
+let highScore     = parseInt(localStorage.getItem("mbaHigh") || "0");
+let distTraveled  = 0;
+let screenShake   = 0;
+let pipeSpeed     = INIT_SPEED;
+let motivMsg      = "";
+let nightTransAlpha = 0;  // smooth day↔night crossfade
+
+// Ball skin index (picked on menu, persists per session)
+let selectedSkin  = 0;
+
+const MOTIV = [
+  "You're getting better! Try again! 🔥",
+  "Almost! One more run! 💪",
+  "The legend never gives up! 🏆",
+  "Tap faster next time! ⚡",
+  "So close! Beat your record! 🚀",
+  "Champion mode: ON! 🌟",
 ];
 
-// ─── SOUNDS ───────────────────────────────────────────────────
-function tryLoadAudio(path) {
-  const a = new Audio();
-  a.src = path;
-  return a;
+// ── Sounds (graceful fail if files missing) ─────────────────
+function mkAudio(src, vol = 1) {
+  const a = new Audio(); a.src = src; a.volume = vol; return a;
 }
-const flapSound    = tryLoadAudio("sounds/flap.wav");
-const hitSound     = tryLoadAudio("sounds/hit.wav");
-const bgm          = tryLoadAudio("sounds/bgm.mp3");
-const coinSound    = tryLoadAudio("sounds/coin.wav");
-const powerUpSound = tryLoadAudio("sounds/powerup.wav");
-const gameOverSound= tryLoadAudio("sounds/gameover.wav");
-bgm.loop = true;
-bgm.volume = 0.4;
-hitSound.volume = 0.7;
-gameOverSound.volume = 0.6;
+const SFX = {
+  flap:    mkAudio("sounds/flap.wav",    0.6),
+  hit:     mkAudio("sounds/hit.wav",     0.7),
+  coin:    mkAudio("sounds/coin.wav",    0.7),
+  powerup: mkAudio("sounds/powerup.wav", 0.8),
+  over:    mkAudio("sounds/gameover.wav",0.6),
+  bgm:     mkAudio("sounds/bgm.mp3",     0.35),
+};
+SFX.bgm.loop = true;
+function play(k) { try { SFX[k].currentTime = 0; SFX[k].play(); } catch(e){} }
 
-// ─── BALL ─────────────────────────────────────────────────────
+// ── Ball skins ───────────────────────────────────────────────
+// Each skin: [highlight, midColor, deepColor, trailColor, label]
+const SKINS = [
+  ["#ffffff","#93c5fd","#1d4ed8","#60a5fa","🔵 Sapphire"],
+  ["#ffffff","#f9a8d4","#be185d","#f472b6","🩷 Rose"],
+  ["#ffffff","#6ee7b7","#065f46","#34d399","🟢 Emerald"],
+  ["#ffffff","#fde68a","#b45309","#fbbf24","🟡 Gold"],
+  ["#ffffff","#c4b5fd","#5b21b6","#a78bfa","🟣 Amethyst"],
+  ["#ffffff","#fed7aa","#c2410c","#fb923c","🟠 Ember"],
+];
+
+// ── The Ball ─────────────────────────────────────────────────
 const ball = {
-  x: 110,
-  y: 300,
-  radius: 20,
+  x: 0, y: 0,
+  radius: 0,
   velocity: 0,
   rotation: 0,
-  glow: 0,
   trail: [],
   powerUp: null,
   powerUpTimer: 0,
 
+  init() {
+    this.radius   = Math.max(18, sc(18));
+    this.x        = canvas.width  * 0.22;
+    this.y        = canvas.height * 0.45;
+    this.velocity = 0;
+    this.rotation = 0;
+    this.trail    = [];
+    this.powerUp  = null;
+    this.powerUpTimer = 0;
+  },
+
+  skin() { return SKINS[selectedSkin]; },
+  trailColor() {
+    if (this.powerUp === "shield") return "#34d399";
+    if (this.powerUp === "magnet") return "#fbbf24";
+    if (this.powerUp === "slow")   return "#f472b6";
+    return this.skin()[3];
+  },
+
   update() {
     this.velocity += GRAVITY;
-    this.y += this.velocity;
-    this.rotation += 0.06;
-    this.glow = Math.sin(frames * 0.1) * 0.4 + 0.6;
+    this.y        += this.velocity;
+    this.rotation += 0.055;
 
+    // trail
     if (frames % 2 === 0) {
       this.trail.push({
-        x: this.x - 5,
-        y: this.y + (Math.random() - 0.5) * 10,
-        size: Math.random() * 7 + 3,
-        life: 22,
-        color: this.getTrailColor(),
+        x: this.x - this.radius * 0.3,
+        y: this.y + (Math.random() - 0.5) * 8,
+        size: Math.random() * this.radius * 0.45 + this.radius * 0.15,
+        life: 20,
+        color: this.trailColor(),
       });
     }
-
     for (let i = this.trail.length - 1; i >= 0; i--) {
       this.trail[i].life--;
-      this.trail[i].size *= 0.94;
+      this.trail[i].size *= 0.93;
       if (this.trail[i].life <= 0) this.trail.splice(i, 1);
     }
 
-    if (this.powerUp && this.powerUpTimer > 0) {
-      this.powerUpTimer--;
-      if (this.powerUpTimer === 0) this.powerUp = null;
-    }
-  },
-
-  getTrailColor() {
-    if (this.powerUp === "shield") return "#34d399";
-    if (this.powerUp === "magnet") return "#fbbf24";
-    if (this.powerUp === "speed")  return "#f87171";
-    return theme === "day" ? "#60a5fa" : "#a78bfa";
+    // power-up countdown
+    if (this.powerUp && --this.powerUpTimer <= 0) this.powerUp = null;
   },
 
   draw() {
-    // Trail
+    const r = this.radius;
+    const [hi, mid, deep, trail] = this.skin();
+
+    // trail particles
     for (const p of this.trail) {
-      ctx.globalAlpha = (p.life / 22) * 0.7;
+      ctx.globalAlpha = (p.life / 20) * 0.65;
       ctx.fillStyle = p.color;
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
@@ -127,762 +156,863 @@ const ball = {
     ctx.save();
     ctx.translate(this.x, this.y);
 
-    // Power-up aura ring
+    // power-up pulsing ring
     if (this.powerUp) {
-      const ringAlpha = 0.5 + Math.sin(frames * 0.15) * 0.3;
-      const ringColor = this.powerUp === "shield" ? "#34d399"
-                      : this.powerUp === "magnet" ? "#fbbf24"
-                      : "#f87171";
-      ctx.beginPath();
-      ctx.arc(0, 0, this.radius * 2.0, 0, Math.PI * 2);
-      ctx.strokeStyle = ringColor;
-      ctx.lineWidth = 3;
-      ctx.globalAlpha = ringAlpha;
-      ctx.stroke();
+      const ringC = this.powerUp === "shield" ? "#34d399"
+                  : this.powerUp === "magnet" ? "#fbbf24" : "#f472b6";
+      const alpha = 0.4 + Math.sin(frames * 0.18) * 0.3;
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = ringC;
+      ctx.lineWidth = sc(3);
+      ctx.beginPath(); ctx.arc(0, 0, r * 1.9, 0, Math.PI * 2); ctx.stroke();
       ctx.globalAlpha = 1;
     }
 
-    // Outer glow
-    const outerGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, this.radius * 2.4);
-    const gc = this.getTrailColor();
-    outerGlow.addColorStop(0, gc + "99");
-    outerGlow.addColorStop(1, gc + "00");
-    ctx.fillStyle = outerGlow;
-    ctx.beginPath();
-    ctx.arc(0, 0, this.radius * 2.4, 0, Math.PI * 2);
-    ctx.fill();
+    // soft outer glow
+    const og = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 2.5);
+    og.addColorStop(0, trail + "88");
+    og.addColorStop(1, trail + "00");
+    ctx.fillStyle = og;
+    ctx.beginPath(); ctx.arc(0, 0, r * 2.5, 0, Math.PI * 2); ctx.fill();
 
     ctx.rotate(this.rotation);
 
-    // Main ball
-    const ballGrad = ctx.createRadialGradient(-7, -7, 1, 0, 0, this.radius);
+    // main gradient sphere
+    const bg = ctx.createRadialGradient(-r * 0.35, -r * 0.35, r * 0.05, 0, 0, r);
     if (this.powerUp === "shield") {
-      ballGrad.addColorStop(0, "#ffffff");
-      ballGrad.addColorStop(0.4, "#6ee7b7");
-      ballGrad.addColorStop(1, "#059669");
+      bg.addColorStop(0, "#ffffff"); bg.addColorStop(0.45, "#6ee7b7"); bg.addColorStop(1, "#065f46");
     } else if (this.powerUp === "magnet") {
-      ballGrad.addColorStop(0, "#ffffff");
-      ballGrad.addColorStop(0.4, "#fde68a");
-      ballGrad.addColorStop(1, "#d97706");
-    } else if (this.powerUp === "speed") {
-      ballGrad.addColorStop(0, "#ffffff");
-      ballGrad.addColorStop(0.4, "#fca5a5");
-      ballGrad.addColorStop(1, "#dc2626");
-    } else if (theme === "day") {
-      ballGrad.addColorStop(0, "#ffffff");
-      ballGrad.addColorStop(0.3, "#93c5fd");
-      ballGrad.addColorStop(1, "#1d4ed8");
+      bg.addColorStop(0, "#ffffff"); bg.addColorStop(0.45, "#fde68a"); bg.addColorStop(1, "#b45309");
+    } else if (this.powerUp === "slow") {
+      bg.addColorStop(0, "#ffffff"); bg.addColorStop(0.45, "#f9a8d4"); bg.addColorStop(1, "#9d174d");
     } else {
-      ballGrad.addColorStop(0, "#ffffff");
-      ballGrad.addColorStop(0.3, "#c4b5fd");
-      ballGrad.addColorStop(1, "#7c3aed");
+      bg.addColorStop(0, hi); bg.addColorStop(0.38, mid); bg.addColorStop(1, deep);
     }
-
-    ctx.shadowColor = this.getTrailColor();
-    ctx.shadowBlur = 18;
-    ctx.fillStyle = ballGrad;
-    ctx.beginPath();
-    ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.shadowColor = trail; ctx.shadowBlur = sc(14);
+    ctx.fillStyle = bg;
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
     ctx.shadowBlur = 0;
 
-    // Shine
-    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    // shine
+    ctx.fillStyle = "rgba(255,255,255,0.82)";
     ctx.beginPath();
-    ctx.ellipse(-6, -6, 7, 5, Math.PI / 4, 0, Math.PI * 2);
+    ctx.ellipse(-r * 0.28, -r * 0.28, r * 0.32, r * 0.22, Math.PI / 4, 0, Math.PI * 2);
     ctx.fill();
 
-    // Inner ring
-    ctx.strokeStyle = "rgba(255,255,255,0.4)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(0, 0, this.radius * 0.65, 0, Math.PI * 2);
-    ctx.stroke();
+    // inner facet ring
+    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(0, 0, r * 0.62, 0, Math.PI * 2); ctx.stroke();
 
     ctx.restore();
   },
 
   flap() {
-    this.velocity = JUMP_VELOCITY;
-    try { flapSound.currentTime = 0; flapSound.play(); } catch(e){}
-    for (let i = 0; i < 6; i++) {
+    this.velocity = JUMP_VEL;
+    play("flap");
+    for (let i = 0; i < 7; i++) {
       this.trail.push({
-        x: this.x,
-        y: this.y,
-        size: Math.random() * 6 + 3,
-        life: 18,
-        color: this.getTrailColor(),
+        x: this.x, y: this.y,
+        size: Math.random() * this.radius * 0.4 + this.radius * 0.15,
+        life: 16, color: this.trailColor(),
       });
     }
   },
 
   activatePowerUp(type) {
     this.powerUp = type;
-    this.powerUpTimer = type === "speed" ? 200 : 320;
-    try { powerUpSound.play(); } catch(e){}
-  }
+    this.powerUpTimer = 300;
+    play("powerup");
+  },
 };
 
-// ─── COINS & POWER-UPS ────────────────────────────────────────
-const coinsArray   = [];
-const powerUpsArray = [];
+// ── Pipes ────────────────────────────────────────────────────
+const pipes = [];
+function addPipe() {
+  const gap  = PIPE_GAP();
+  const pw   = PIPE_W();
+  const minT = canvas.height * 0.12;
+  const maxT = canvas.height * 0.72 - gap;
+  const top  = Math.random() * (maxT - minT) + minT;
+  pipes.push({ x: canvas.width + pw, top, bottom: top + gap, passed: false, pw });
+}
 
-function createSparkle(x, y, color = "#FFD700") {
-  for (let i = 0; i < 8; i++) {
+// ── Collectibles ─────────────────────────────────────────────
+const coinsArr = [], puArr = [];
+
+function addCollectibles() {
+  if (!pipes.length) return;
+  const lp  = pipes[pipes.length - 1];
+  const cy  = (lp.top + lp.bottom) / 2;
+  const gap = lp.bottom - lp.top;
+  if (Math.random() < 0.7) {
+    coinsArr.push({ x: lp.x + lp.pw / 2 + sc(70), y: cy + (Math.random() - 0.5) * gap * 0.35, hit: false });
+  }
+  if (Math.random() < 0.14) {
+    const types = ["shield","magnet","slow"];
+    puArr.push({ x: lp.x + lp.pw / 2 + sc(110), y: cy + (Math.random() - 0.5) * gap * 0.28, type: types[Math.floor(Math.random()*3)], hit: false });
+  }
+}
+
+// ── Sparkles ─────────────────────────────────────────────────
+function burst(x, y, color, n = 10) {
+  for (let i = 0; i < n; i++) {
     sparkles.push({
       x, y,
-      size: Math.random() * 5 + 2,
-      speedX: (Math.random() - 0.5) * 6,
-      speedY: (Math.random() - 0.5) * 6,
-      life: 45,
-      color,
+      vx: (Math.random() - 0.5) * 6,
+      vy: (Math.random() - 0.5) * 6,
+      size: Math.random() * sc(5) + sc(2),
+      life: 50, color,
     });
   }
 }
 
-function drawCoin(coin) {
-  const bounce = Math.sin(frames * 0.18 + coin.x) * 5;
-  const pulse = Math.sin(frames * 0.15) * 0.25 + 0.75;
-
-  ctx.save();
-  ctx.translate(coin.x, coin.y + bounce);
-
-  // Glow
-  const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, 22);
-  glow.addColorStop(0, `rgba(251,191,36,${pulse * 0.55})`);
-  glow.addColorStop(1, "rgba(251,191,36,0)");
-  ctx.fillStyle = glow;
-  ctx.beginPath(); ctx.arc(0, 0, 22, 0, Math.PI * 2); ctx.fill();
-
-  // Body
-  const g = ctx.createRadialGradient(-4, -4, 0, 0, 0, 13);
-  g.addColorStop(0, "#fef3c7");
-  g.addColorStop(0.5, "#fbbf24");
-  g.addColorStop(1, "#b45309");
-  ctx.fillStyle = g;
-  ctx.beginPath(); ctx.arc(0, 0, 13, 0, Math.PI * 2); ctx.fill();
-
-  ctx.strokeStyle = "#d97706"; ctx.lineWidth = 2;
-  ctx.stroke();
-
-  ctx.fillStyle = "#92400e";
-  ctx.font = "bold 13px Arial";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText("✦", 0, 0);
-
-  ctx.restore();
-}
-
-function drawPowerUp(pu) {
-  const bounce = Math.sin(frames * 0.12 + pu.x) * 6;
-  const pulse = Math.sin(frames * 0.1) * 0.4 + 0.6;
-
-  ctx.save();
-  ctx.translate(pu.x, pu.y + bounce);
-  ctx.rotate(frames * 0.04);
-
-  const colors = {
-    shield: ["#6ee7b7", "#059669"],
-    magnet: ["#fde68a", "#d97706"],
-    speed:  ["#fca5a5", "#dc2626"],
-  };
-  const [light, dark] = colors[pu.type] || ["#fff", "#999"];
-
-  // Aura
-  const aura = ctx.createRadialGradient(0, 0, 0, 0, 0, 28);
-  aura.addColorStop(0, light + Math.round(pulse * 0.6 * 255).toString(16).padStart(2,"0"));
-  aura.addColorStop(1, light + "00");
-  ctx.fillStyle = aura;
-  ctx.beginPath(); ctx.arc(0, 0, 28, 0, Math.PI * 2); ctx.fill();
-
-  // Hexagon body
-  ctx.beginPath();
-  for (let i = 0; i < 6; i++) {
-    const angle = (Math.PI / 3) * i - Math.PI / 6;
-    const r = 16;
-    i === 0 ? ctx.moveTo(Math.cos(angle)*r, Math.sin(angle)*r)
-            : ctx.lineTo(Math.cos(angle)*r, Math.sin(angle)*r);
+// ── Background objects ───────────────────────────────────────
+let clouds = [], stars = [], bgMountains = [];
+function initBgObjects() {
+  clouds = [];
+  for (let i = 0; i < 8; i++) {
+    clouds.push({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height * 0.5,
+      w: sc(55 + Math.random() * 90),
+      h: sc(22 + Math.random() * 28),
+      spd: 0.18 + Math.random() * 0.32,
+      alpha: 0.55 + Math.random() * 0.35,
+    });
   }
-  ctx.closePath();
-  const g = ctx.createRadialGradient(-4, -4, 0, 0, 0, 16);
-  g.addColorStop(0, "#fff"); g.addColorStop(0.5, light); g.addColorStop(1, dark);
-  ctx.fillStyle = g;
-  ctx.shadowColor = light; ctx.shadowBlur = 12;
-  ctx.fill(); ctx.shadowBlur = 0;
-
-  ctx.fillStyle = "#fff";
-  ctx.font = "14px Arial";
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText(pu.type === "shield" ? "🛡" : pu.type === "magnet" ? "🧲" : "⚡", 0, 1);
-
-  ctx.restore();
-}
-
-// ─── PIPES ────────────────────────────────────────────────────
-const pipes = [];
-
-function addPipe() {
-  const minTop = 80;
-  const maxTop = canvas.height - PIPE_GAP - 80;
-  const topHeight = Math.random() * (maxTop - minTop) + minTop;
-  pipes.push({ x: canvas.width + 10, top: topHeight, bottom: topHeight + PIPE_GAP, passed: false });
-}
-
-function addRandomCoin() {
-  if (pipes.length === 0) return;
-  const lp = pipes[pipes.length - 1];
-  const cy = (lp.top + lp.bottom) / 2;
-
-  if (Math.random() < 0.65) {
-    coinsArray.push({ x: lp.x + PIPE_WIDTH / 2 + 80, y: cy + (Math.random() - 0.5) * (PIPE_GAP * 0.4), collected: false });
+  stars = [];
+  for (let i = 0; i < 110; i++) {
+    stars.push({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height * 0.85,
+      r: Math.random() * sc(2) + sc(0.5),
+      b: 0.3 + Math.random() * 0.7,
+    });
   }
-  if (Math.random() < 0.12) {
-    const types = ["shield", "magnet", "speed"];
-    powerUpsArray.push({ x: lp.x + PIPE_WIDTH / 2 + 130, y: cy + (Math.random() - 0.5) * (PIPE_GAP * 0.3), type: types[Math.floor(Math.random() * 3)], collected: false });
+  bgMountains = [];
+  for (let i = 0; i < 5; i++) {
+    bgMountains.push({
+      x: (canvas.width / 4) * i,
+      w: canvas.width * 0.35,
+      h: canvas.height * (0.18 + Math.random() * 0.14),
+    });
   }
 }
+initBgObjects();
 
-// ─── BACKGROUND ───────────────────────────────────────────────
-const clouds = [];
-const stars  = [];
-
-for (let i = 0; i < 7; i++) {
-  clouds.push({ x: Math.random() * 2000, y: Math.random() * (canvas.height * 0.55), w: 70 + Math.random() * 130, h: 35 + Math.random() * 40, speed: 0.25 + Math.random() * 0.5 });
-}
-for (let i = 0; i < 100; i++) {
-  stars.push({ x: Math.random() * 2000, y: Math.random() * 800, size: Math.random() * 2.2 + 0.3, b: Math.random() });
-}
-
+// Draw background
 function drawBackground() {
-  const g = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  // Sky gradient
+  const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
   if (theme === "day") {
-    g.addColorStop(0, "#0ea5e9");
-    g.addColorStop(0.55, "#38bdf8");
-    g.addColorStop(0.85, "#7dd3fc");
-    g.addColorStop(1, "#86efac");
+    sky.addColorStop(0,   "#0ea5e9");
+    sky.addColorStop(0.6, "#38bdf8");
+    sky.addColorStop(0.9, "#7dd3fc");
+    sky.addColorStop(1,   "#86efac");
   } else {
-    g.addColorStop(0, "#0f172a");
-    g.addColorStop(0.6, "#1e1b4b");
-    g.addColorStop(1, "#312e81");
+    sky.addColorStop(0,   "#020617");
+    sky.addColorStop(0.55,"#0f172a");
+    sky.addColorStop(0.85,"#1e1b4b");
+    sky.addColorStop(1,   "#312e81");
   }
-  ctx.fillStyle = g;
+  ctx.fillStyle = sky;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  if (theme === "night") {
+  // stars (night only, smooth fade)
+  if (nightTransAlpha > 0) {
     for (const s of stars) {
-      const tw = Math.sin(frames * 0.04 + s.x) * 0.35 + 0.65;
-      ctx.globalAlpha = s.b * tw;
+      const tw = Math.sin(frames * 0.04 + s.x * 0.1) * 0.28 + 0.72;
+      ctx.globalAlpha = s.b * tw * nightTransAlpha;
       ctx.fillStyle = "#ffffff";
-      ctx.beginPath();
-      ctx.arc(s.x % canvas.width, s.y % canvas.height, s.size, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
     }
     ctx.globalAlpha = 1;
   }
 
-  // Clouds
-  ctx.fillStyle = theme === "day" ? "rgba(255,255,255,0.80)" : "rgba(255,255,255,0.08)";
-  for (const c of clouds) {
+  // mountains
+  const mAlpha = theme === "day" ? 0.18 : 0.35;
+  ctx.fillStyle = theme === "day" ? `rgba(14,165,233,${mAlpha})` : `rgba(99,102,241,${mAlpha})`;
+  for (const m of bgMountains) {
     ctx.beginPath();
-    ctx.ellipse(c.x % canvas.width, c.y, c.w, c.h, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // second puff
-    ctx.beginPath();
-    ctx.ellipse((c.x + c.w * 0.55) % canvas.width, c.y - c.h * 0.3, c.w * 0.7, c.h * 0.7, 0, 0, Math.PI * 2);
-    ctx.fill();
-    c.x -= c.speed;
-    if (c.x + c.w < 0) c.x = canvas.width + c.w;
+    ctx.moveTo(m.x, canvas.height * 0.78);
+    ctx.lineTo(m.x + m.w / 2, canvas.height * 0.78 - m.h);
+    ctx.lineTo(m.x + m.w, canvas.height * 0.78);
+    ctx.closePath(); ctx.fill();
   }
 
-  // Ground strip
-  const gr = ctx.createLinearGradient(0, canvas.height - 40, 0, canvas.height);
-  gr.addColorStop(0, theme === "day" ? "#4ade80" : "#1e1b4b");
-  gr.addColorStop(1, theme === "day" ? "#16a34a" : "#0f172a");
-  ctx.fillStyle = gr;
-  ctx.fillRect(0, canvas.height - 40, canvas.width, 40);
+  // clouds
+  for (const c of clouds) {
+    ctx.globalAlpha = c.alpha * (theme === "day" ? 1 : 0.12);
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.ellipse(c.x, c.y, c.w, c.h, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(c.x + c.w * 0.5, c.y - c.h * 0.35, c.w * 0.65, c.h * 0.68, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(c.x - c.w * 0.45, c.y - c.h * 0.2, c.w * 0.55, c.h * 0.6, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    c.x -= c.spd;
+    if (c.x + c.w * 1.1 < 0) c.x = canvas.width + c.w;
+  }
+
+  // ground strip
+  const gnd = ctx.createLinearGradient(0, canvas.height * 0.92, 0, canvas.height);
+  if (theme === "day") {
+    gnd.addColorStop(0, "#4ade80"); gnd.addColorStop(1, "#15803d");
+  } else {
+    gnd.addColorStop(0, "#1e1b4b"); gnd.addColorStop(1, "#0f172a");
+  }
+  ctx.fillStyle = gnd;
+  ctx.fillRect(0, canvas.height * 0.92, canvas.width, canvas.height * 0.08);
 }
 
-// ─── HUD HELPERS ──────────────────────────────────────────────
-function glassBox(x, y, w, h, radius = 14) {
+// ── Draw pipe ────────────────────────────────────────────────
+function drawPipe(p) {
+  const pw = p.pw;
+  const pg = ctx.createLinearGradient(p.x, 0, p.x + pw, 0);
+  if (theme === "day") {
+    pg.addColorStop(0, "#166534"); pg.addColorStop(0.45, "#22c55e"); pg.addColorStop(1, "#166534");
+  } else {
+    pg.addColorStop(0, "#3730a3"); pg.addColorStop(0.45, "#6366f1"); pg.addColorStop(1, "#3730a3");
+  }
+  const capX = p.x - pw * 0.1, capW = pw * 1.2, capH = sc(22), capR = sc(6);
+
+  // top pipe
+  ctx.fillStyle = pg;
+  ctx.fillRect(p.x, 0, pw, p.top);
+  // top cap
+  ctx.fillStyle = theme === "day" ? "#16a34a" : "#4f46e5";
+  roundedRect(capX, p.top - capH, capW, capH, [0, 0, capR, capR]);
+  // highlight
+  ctx.fillStyle = "rgba(255,255,255,0.12)";
+  ctx.fillRect(p.x + pw * 0.15, 0, pw * 0.18, p.top);
+
+  // bottom pipe
+  ctx.fillStyle = pg;
+  ctx.fillRect(p.x, p.bottom, pw, canvas.height - p.bottom);
+  // bottom cap
+  ctx.fillStyle = theme === "day" ? "#16a34a" : "#4f46e5";
+  roundedRect(capX, p.bottom, capW, capH, [capR, capR, 0, 0]);
+  // highlight
+  ctx.fillStyle = "rgba(255,255,255,0.12)";
+  ctx.fillRect(p.x + pw * 0.15, p.bottom, pw * 0.18, canvas.height - p.bottom);
+}
+
+function roundedRect(x, y, w, h, radii) {
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, radii); ctx.fill();
+}
+
+// ── Draw coin ────────────────────────────────────────────────
+function drawCoin(c) {
+  const bounce = Math.sin(frames * 0.18 + c.x * 0.02) * sc(4);
+  ctx.save(); ctx.translate(c.x, c.y + bounce);
+  const r = sc(13);
+  const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 1.8);
+  glow.addColorStop(0, "rgba(251,191,36,0.6)"); glow.addColorStop(1, "rgba(251,191,36,0)");
+  ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(0, 0, r * 1.8, 0, Math.PI * 2); ctx.fill();
+
+  const g = ctx.createRadialGradient(-r * 0.3, -r * 0.3, 0, 0, 0, r);
+  g.addColorStop(0, "#fef9c3"); g.addColorStop(0.5, "#fbbf24"); g.addColorStop(1, "#92400e");
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = "#d97706"; ctx.lineWidth = sc(1.5); ctx.stroke();
+
+  ctx.fillStyle = "#78350f"; ctx.font = `bold ${sc(11)}px Arial`;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("✦", 0, 0);
+  ctx.restore();
+}
+
+// ── Draw power-up ────────────────────────────────────────────
+function drawPowerUp(pu) {
+  const bounce = Math.sin(frames * 0.13 + pu.x * 0.02) * sc(5);
+  const pulse  = Math.sin(frames * 0.1) * 0.3 + 0.7;
+  ctx.save(); ctx.translate(pu.x, pu.y + bounce); ctx.rotate(frames * 0.035);
+
+  const cfg = {
+    shield: { c1: "#6ee7b7", c2: "#065f46", aura: "rgba(52,211,153,", icon: "🛡" },
+    magnet: { c1: "#fde68a", c2: "#b45309", aura: "rgba(251,191,36,",  icon: "🧲" },
+    slow:   { c1: "#f9a8d4", c2: "#9d174d", aura: "rgba(244,114,182,", icon: "⏱" },
+  }[pu.type] || { c1:"#fff", c2:"#888", aura:"rgba(255,255,255,", icon:"?" };
+
+  const r = sc(16);
+  const aura = ctx.createRadialGradient(0,0,0,0,0,r*2);
+  aura.addColorStop(0, cfg.aura + (pulse * 0.55) + ")");
+  aura.addColorStop(1, cfg.aura + "0)");
+  ctx.fillStyle = aura; ctx.beginPath(); ctx.arc(0,0,r*2,0,Math.PI*2); ctx.fill();
+
+  // hexagon
   ctx.beginPath();
-  ctx.roundRect(x, y, w, h, radius);
-  ctx.fillStyle = "rgba(15,15,40,0.55)";
-  ctx.fill();
-  ctx.strokeStyle = "rgba(255,255,255,0.15)";
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
+  for (let i = 0; i < 6; i++) {
+    const a = (Math.PI/3)*i - Math.PI/6;
+    i===0 ? ctx.moveTo(Math.cos(a)*r, Math.sin(a)*r) : ctx.lineTo(Math.cos(a)*r, Math.sin(a)*r);
+  }
+  ctx.closePath();
+  const hg = ctx.createRadialGradient(-r*0.3,-r*0.3,0,0,0,r);
+  hg.addColorStop(0,"#fff"); hg.addColorStop(0.5,cfg.c1); hg.addColorStop(1,cfg.c2);
+  ctx.fillStyle = hg; ctx.shadowColor = cfg.c1; ctx.shadowBlur = sc(10);
+  ctx.fill(); ctx.shadowBlur = 0;
+
+  ctx.font = `${sc(14)}px Arial`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(cfg.icon, 0, 0);
+  ctx.restore();
+}
+
+// ── HUD helpers ──────────────────────────────────────────────
+function glass(x, y, w, h, r = sc(12), strokeColor = "rgba(255,255,255,0.18)") {
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, r);
+  ctx.fillStyle = "rgba(8,8,30,0.62)"; ctx.fill();
+  ctx.strokeStyle = strokeColor; ctx.lineWidth = sc(1.5); ctx.stroke();
 }
 
 function drawHUD() {
-  // Left stats panel
-  const panelW = 190, panelH = 120;
-  glassBox(16, 16, panelW, panelH);
+  // Left: score / coins / dist
+  const pw = sc(155), ph = sc(95), px = sc(14), py = sc(14);
+  glass(px, py, pw, ph);
 
-  ctx.fillStyle = "#f8fafc";
-  ctx.font = "bold 28px 'Orbitron', sans-serif";
   ctx.textAlign = "left";
-  ctx.fillText(score, 34, 55);
+  ctx.fillStyle = "#f8fafc";
+  ctx.font = `900 ${sc(28)}px 'Fredoka One', cursive`;
+  ctx.fillText(score, px + sc(14), py + ph * 0.48);
 
-  ctx.font = "12px 'Rajdhani', sans-serif";
-  ctx.fillStyle = "rgba(255,255,255,0.55)";
-  ctx.fillText("SCORE", 34, 68);
+  ctx.font = `700 ${sc(11)}px 'Nunito', sans-serif`;
+  ctx.fillStyle = "rgba(255,255,255,0.45)";
+  ctx.fillText("SCORE", px + sc(14), py + ph * 0.65);
 
   ctx.fillStyle = "#fbbf24";
-  ctx.font = "bold 20px 'Orbitron', sans-serif";
-  ctx.fillText(`✦ ${coins}`, 34, 96);
+  ctx.font = `700 ${sc(14)}px 'Nunito', sans-serif`;
+  ctx.fillText(`✦ ${coins} coins`, px + sc(14), py + ph * 0.85);
 
-  ctx.font = "11px 'Rajdhani', sans-serif";
-  ctx.fillStyle = "rgba(255,255,255,0.45)";
-  ctx.fillText(`${Math.floor(distanceTraveled)}m`, 130, 96);
+  // Distance top right
+  const dw = sc(100), dh = sc(34);
+  glass(canvas.width - dw - sc(14), sc(14), dw, dh, sc(10));
+  ctx.fillStyle = "#7dd3fc"; ctx.font = `700 ${sc(12)}px 'Nunito', sans-serif`;
+  ctx.textAlign = "center";
+  ctx.fillText(`${Math.floor(distTraveled)}m`, canvas.width - dw/2 - sc(14), sc(14) + dh*0.64);
 
-  // Combo badge
+  // Combo
   if (combo > 2) {
-    const cx = 16, cy = 148;
-    glassBox(cx, cy, 130, 36, 10);
     const hue = combo > 8 ? "#f87171" : "#4ade80";
-    ctx.fillStyle = hue;
-    ctx.font = `bold 18px 'Orbitron', sans-serif`;
+    glass(sc(14), py + ph + sc(8), sc(130), sc(34), sc(9), hue + "55");
+    ctx.fillStyle = hue; ctx.font = `700 ${sc(14)}px 'Fredoka One', cursive`;
     ctx.textAlign = "left";
-    ctx.fillText(`×${combo} COMBO`, cx + 12, cy + 24);
+    ctx.fillText(`⚡ x${combo} COMBO`, sc(26), py + ph + sc(30));
   }
 
-  // Power-up bar (top right)
+  // Power-up bar
   if (ball.powerUp) {
-    const pw = 180, ph = 42;
-    const px = canvas.width - pw - 16;
-    glassBox(px, 16, pw, ph, 12);
-
-    const colors = { shield: "#34d399", magnet: "#fbbf24", speed: "#f87171" };
-    const icons  = { shield: "🛡", magnet: "🧲", speed: "⚡" };
+    const bpw = sc(170), bph = sc(44);
+    const bpx = canvas.width / 2 - bpw / 2, bpy = sc(14);
+    const colors = { shield:"#34d399", magnet:"#fbbf24", slow:"#f472b6" };
+    const icons  = { shield:"🛡 SHIELD", magnet:"🧲 MAGNET", slow:"⏱ SLOW-MO" };
+    glass(bpx, bpy, bpw, bph, sc(11));
     ctx.fillStyle = colors[ball.powerUp];
-    ctx.font = "bold 14px 'Orbitron', sans-serif";
-    ctx.textAlign = "right";
-    ctx.fillText(`${icons[ball.powerUp]} ${ball.powerUp.toUpperCase()}  ${Math.ceil(ball.powerUpTimer/60)}s`, px + pw - 12, 44);
-
-    // Progress bar
-    const maxTime = ball.powerUp === "speed" ? 200 : 320;
-    const barW = (ball.powerUpTimer / maxTime) * (pw - 24);
-    ctx.fillStyle = "rgba(255,255,255,0.12)";
-    ctx.beginPath(); ctx.roundRect(px + 12, 48, pw - 24, 5, 3); ctx.fill();
+    ctx.font = `700 ${sc(13)}px 'Nunito', sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText(icons[ball.powerUp] + "  " + Math.ceil(ball.powerUpTimer/60) + "s", canvas.width/2, bpy + bph*0.52);
+    // progress bar
+    const maxT = 300, barW = (ball.powerUpTimer / maxT) * (bpw - sc(20));
+    ctx.fillStyle = "rgba(255,255,255,0.15)";
+    ctx.beginPath(); ctx.roundRect(bpx + sc(10), bpy + bph - sc(10), bpw - sc(20), sc(6), sc(3)); ctx.fill();
     ctx.fillStyle = colors[ball.powerUp];
-    ctx.beginPath(); ctx.roundRect(px + 12, 48, barW, 5, 3); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(bpx + sc(10), bpy + bph - sc(10), Math.max(0, barW), sc(6), sc(3)); ctx.fill();
   }
 
   // New high score
-  if (score > 0 && score > highScore) {
-    const tw = 220, th = 38;
-    const tx = canvas.width / 2 - tw / 2;
-    glassBox(tx, 16, tw, th, 10);
-    ctx.fillStyle = "#fbbf24";
-    ctx.font = "bold 16px 'Orbitron', sans-serif";
+  if (score > 0 && score >= highScore) {
+    ctx.save();
+    const pulse = 0.8 + Math.sin(frames * 0.1) * 0.2;
+    const hsw = sc(210), hsh = sc(36), hsx = canvas.width/2 - hsw/2, hsy = canvas.height - sc(60);
+    glass(hsx, hsy, hsw, hsh, sc(10), "rgba(251,191,36,0.6)");
+    ctx.fillStyle = `rgba(251,191,36,${pulse})`;
+    ctx.font = `700 ${sc(14)}px 'Fredoka One', cursive`;
     ctx.textAlign = "center";
-    ctx.fillText("★ NEW HIGH SCORE ★", canvas.width / 2, 41);
+    ctx.fillText("★  NEW HIGH SCORE!  ★", canvas.width/2, hsy + hsh*0.65);
+    ctx.restore();
   }
 
   // Dev credit
-  ctx.fillStyle = "rgba(255,255,255,0.35)";
-  ctx.font = "12px 'Rajdhani', sans-serif";
+  ctx.fillStyle = "rgba(255,255,255,0.28)";
+  ctx.font = `${sc(10)}px 'Nunito', sans-serif`;
   ctx.textAlign = "right";
-  ctx.fillText("Developed by Sathwik Rai", canvas.width - 16, canvas.height - 50);
+  ctx.fillText("Developed by Sathwik Rai", canvas.width - sc(12), canvas.height - sc(10));
   ctx.textAlign = "left";
 }
 
-// ─── DRAW PIPES ───────────────────────────────────────────────
-function drawPipes(currentSpeed) {
-  for (let i = pipes.length - 1; i >= 0; i--) {
-    const p = pipes[i];
-    p.x -= currentSpeed;
-
-    const pg = ctx.createLinearGradient(p.x, 0, p.x + PIPE_WIDTH, 0);
-    if (theme === "day") {
-      pg.addColorStop(0, "#166534"); pg.addColorStop(0.45, "#16a34a"); pg.addColorStop(1, "#166534");
-    } else {
-      pg.addColorStop(0, "#3730a3"); pg.addColorStop(0.45, "#4f46e5"); pg.addColorStop(1, "#3730a3");
-    }
-    ctx.fillStyle = pg;
-    ctx.fillRect(p.x, 0, PIPE_WIDTH, p.top);
-    ctx.fillRect(p.x, p.bottom, PIPE_WIDTH, canvas.height - p.bottom);
-
-    // Pipe cap
-    const capColor = theme === "day" ? "#15803d" : "#4338ca";
-    ctx.fillStyle = capColor;
-    const capH = 22, capExtra = 8;
-    ctx.beginPath();
-    ctx.roundRect(p.x - capExtra, p.top - capH, PIPE_WIDTH + capExtra * 2, capH, [0, 0, 6, 6]);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.roundRect(p.x - capExtra, p.bottom, PIPE_WIDTH + capExtra * 2, capH, [6, 6, 0, 0]);
-    ctx.fill();
-
-    // Highlight stripe
-    ctx.fillStyle = "rgba(255,255,255,0.12)";
-    ctx.fillRect(p.x + 10, 0, 8, p.top);
-    ctx.fillRect(p.x + 10, p.bottom, 8, canvas.height - p.bottom);
-
-    // Collision
-    if (!ball.powerUp || ball.powerUp !== "shield") {
-      if (
-        ball.x + ball.radius > p.x &&
-        ball.x - ball.radius < p.x + PIPE_WIDTH &&
-        (ball.y - ball.radius < p.top || ball.y + ball.radius > p.bottom)
-      ) {
-        handleGameOver(); return;
-      }
-    }
-
-    // Score
-    if (!p.passed && p.x + PIPE_WIDTH < ball.x) {
-      score++;
-      combo++;
-      maxCombo = Math.max(maxCombo, combo);
-      p.passed = true;
-      spawnScoreFloat(ball.x, ball.y - 30);
-      if (score % 30 === 0) theme = theme === "day" ? "night" : "day";
-      if (score % SPEED_UP_EVERY === 0) pipeSpeed += SPEED_INCREMENT;
-    }
-
-    if (p.x + PIPE_WIDTH < 0) pipes.splice(i, 1);
-  }
+// ── Score floats ─────────────────────────────────────────────
+function spawnFloat(x, y, txt, color) {
+  scoreFloats.push({ x, y, txt, color, life: 52 });
 }
-
-// Floating score text
-const scoreFloats = [];
-function spawnScoreFloat(x, y) {
-  scoreFloats.push({ x, y, life: 50, text: `+1` });
-}
-
-function updateScoreFloats() {
+function drawFloats() {
   for (let i = scoreFloats.length - 1; i >= 0; i--) {
-    const sf = scoreFloats[i];
-    sf.y -= 1.2;
-    sf.life--;
-    ctx.globalAlpha = sf.life / 50;
-    ctx.fillStyle = "#fbbf24";
-    ctx.font = "bold 22px 'Orbitron', sans-serif";
+    const f = scoreFloats[i];
+    f.y -= 1.1; f.life--;
+    ctx.globalAlpha = f.life / 52;
+    ctx.fillStyle = f.color;
+    ctx.font = `800 ${sc(18)}px 'Fredoka One', cursive`;
     ctx.textAlign = "center";
-    ctx.fillText(sf.text, sf.x, sf.y);
-    if (sf.life <= 0) scoreFloats.splice(i, 1);
+    ctx.fillText(f.txt, f.x, f.y);
+    if (f.life <= 0) scoreFloats.splice(i, 1);
   }
   ctx.globalAlpha = 1;
 }
 
-// ─── GAME LOOP ────────────────────────────────────────────────
-function loop() {
-  // Screen shake
-  ctx.save();
-  if (screenShake > 0) {
-    ctx.translate((Math.random() - 0.5) * screenShake, (Math.random() - 0.5) * screenShake);
-    screenShake *= 0.75;
-    if (screenShake < 0.5) screenShake = 0;
-  }
-
-  ctx.clearRect(-10, -10, canvas.width + 20, canvas.height + 20);
+// ── Instructions ─────────────────────────────────────────────
+// Page 0: How to play
+// Page 1: Power-ups & Ball selector
+function drawInstructions() {
+  // animated bg
   drawBackground();
 
-  // Sparkles
-  for (let i = sparkles.length - 1; i >= 0; i--) {
-    const s = sparkles[i];
-    s.x += s.speedX; s.y += s.speedY; s.life--; s.size *= 0.94;
-    ctx.globalAlpha = s.life / 45;
-    ctx.fillStyle = s.color;
-    ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2); ctx.fill();
-    if (s.life <= 0) sparkles.splice(i, 1);
-  }
-  ctx.globalAlpha = 1;
+  // overlay
+  ctx.fillStyle = "rgba(4,4,22,0.78)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // ── MENU SCREEN ──────────────────────────────────────────────
-  if (!gameStarted) {
-    drawMenuScreen();
-    frames++;
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+  const cw = Math.min(sc(420), canvas.width - sc(28));
+  const ch = Math.min(sc(500), canvas.height - sc(60));
+  const cardX = cx - cw/2, cardY = cy - ch/2;
+
+  // card
+  ctx.beginPath(); ctx.roundRect(cardX, cardY, cw, ch, sc(22));
+  const cardG = ctx.createLinearGradient(cardX, cardY, cardX+cw, cardY+ch);
+  cardG.addColorStop(0, "rgba(15,10,45,0.96)"); cardG.addColorStop(1, "rgba(30,15,60,0.96)");
+  ctx.fillStyle = cardG; ctx.fill();
+  ctx.strokeStyle = "rgba(139,92,246,0.55)"; ctx.lineWidth = sc(2); ctx.stroke();
+
+  // neon top bar
+  const barG = ctx.createLinearGradient(cardX, cardY, cardX+cw, cardY);
+  barG.addColorStop(0,"#7c3aed"); barG.addColorStop(0.5,"#db2777"); barG.addColorStop(1,"#0ea5e9");
+  ctx.fillStyle = barG;
+  ctx.beginPath(); ctx.roundRect(cardX, cardY, cw, sc(5), [sc(22),sc(22),0,0]); ctx.fill();
+
+  if (instrPage === 0) {
+    // ── PAGE 1: How to play ──
+    // Floating logo ball
+    ball.x = cx; ball.y = cardY + sc(50) + Math.sin(frames * 0.045) * sc(8);
+    ball.rotation = frames * 0.03; ball.draw();
+
+    // Title
+    const tg = ctx.createLinearGradient(cx-sc(130),0, cx+sc(130),0);
+    tg.addColorStop(0,"#a78bfa"); tg.addColorStop(0.5,"#f472b6"); tg.addColorStop(1,"#38bdf8");
+    ctx.fillStyle = tg;
+    ctx.font = `900 ${sc(28)}px 'Fredoka One', cursive`;
+    ctx.textAlign = "center";
+    ctx.fillText("HOW TO PLAY", cx, cardY + sc(105));
+
+    ctx.fillStyle = "rgba(255,255,255,0.5)";
+    ctx.font = `600 ${sc(11)}px 'Nunito', sans-serif`;
+    ctx.fillText("Magic Ball Adventure", cx, cardY + sc(120));
+
+    // Step cards
+    const steps = [
+      { icon:"👆", title:"TAP / CLICK / SPACE", desc:"to make the ball fly up" },
+      { icon:"🚀", title:"DODGE THE PIPES",     desc:"pass through the gaps to score" },
+      { icon:"✦",  title:"COLLECT COINS",       desc:"for bonus points & combo multiplier" },
+      { icon:"⚡",  title:"GRAB POWER-UPS",     desc:"they appear in the gaps — grab them!" },
+    ];
+    const stepH = sc(52), stepGap = sc(8);
+    const stepW = cw - sc(30);
+    const stepX = cardX + sc(15);
+    let sy = cardY + sc(132);
+    steps.forEach(s => {
+      glass(stepX, sy, stepW, stepH, sc(10), "rgba(139,92,246,0.25)");
+      ctx.font = `${sc(22)}px Arial`; ctx.textAlign = "left";
+      ctx.fillText(s.icon, stepX + sc(12), sy + stepH*0.62);
+      ctx.fillStyle = "#e2e8f0"; ctx.font = `700 ${sc(12)}px 'Nunito', sans-serif`;
+      ctx.fillText(s.title, stepX + sc(44), sy + stepH*0.42);
+      ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.font = `${sc(11)}px 'Nunito', sans-serif`;
+      ctx.fillText(s.desc, stepX + sc(44), sy + stepH*0.72);
+      sy += stepH + stepGap;
+    });
+
+    // theme toggle note
+    sy += sc(2);
+    ctx.fillStyle = "rgba(251,191,36,0.85)"; ctx.font = `600 ${sc(10.5)}px 'Nunito', sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText("🌙 Theme changes every 30 pipes — keep flying!", cx, sy + sc(10));
+
+    // Page dots
+    drawPageDots(cx, cardY + ch - sc(40), 2, 0);
+
+    // Next button
+    drawNeonButton(cx, cardY + ch - sc(14), sc(170), sc(42), "NEXT  →", "#7c3aed", "#a21caf");
+
+  } else {
+    // ── PAGE 2: Power-ups + Ball chooser ──
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.font = `900 ${sc(24)}px 'Fredoka One', cursive`;
+    ctx.textAlign = "center";
+    ctx.fillText("POWER-UPS & SKINS", cx, cardY + sc(38));
+
+    // Power-up rows
+    const puInfo = [
+      { icon:"🛡", name:"SHIELD",      color:"#34d399", desc:"Invincible — pipes can't hurt you" },
+      { icon:"🧲", name:"MAGNET",      color:"#fbbf24", desc:"Attracts nearby coins to you" },
+      { icon:"⏱", name:"SLOW-MOTION", color:"#f472b6", desc:"Everything slows down for 5s" },
+    ];
+    let py2 = cardY + sc(52);
+    puInfo.forEach(p => {
+      glass(cardX + sc(12), py2, cw - sc(24), sc(48), sc(9), p.color + "44");
+      ctx.fillStyle = p.color; ctx.font = `700 ${sc(13)}px 'Nunito', sans-serif`;
+      ctx.textAlign = "left";
+      ctx.fillText(`${p.icon}  ${p.name}`, cardX + sc(24), py2 + sc(22));
+      ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.font = `${sc(11)}px 'Nunito', sans-serif`;
+      ctx.fillText(p.desc, cardX + sc(24), py2 + sc(38));
+      py2 += sc(54);
+    });
+
+    // Skin selector
+    py2 += sc(4);
+    ctx.fillStyle = "rgba(255,255,255,0.75)"; ctx.font = `700 ${sc(12)}px 'Nunito', sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText("— CHOOSE YOUR BALL SKIN —", cx, py2);
+    py2 += sc(10);
+
+    const skinCols = 3, skinW = (cw - sc(28)) / skinCols;
+    SKINS.forEach((sk, idx) => {
+      const col = idx % skinCols, row = Math.floor(idx / skinCols);
+      const sx2 = cardX + sc(14) + col * skinW;
+      const sy2 = py2 + row * sc(58);
+      const selected = idx === selectedSkin;
+
+      glass(sx2, sy2, skinW - sc(6), sc(52), sc(10),
+        selected ? sk[3] + "cc" : "rgba(255,255,255,0.12)");
+
+      // mini ball preview
+      const bx = sx2 + skinW/2 - sc(3), by = sy2 + sc(20);
+      const br = sc(11);
+      const bg2 = ctx.createRadialGradient(bx - br*0.3, by - br*0.3, 0, bx, by, br);
+      bg2.addColorStop(0, sk[0]); bg2.addColorStop(0.4, sk[1]); bg2.addColorStop(1, sk[2]);
+      ctx.fillStyle = bg2; ctx.shadowColor = sk[3]; ctx.shadowBlur = selected ? sc(10) : 0;
+      ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
+
+      ctx.fillStyle = selected ? "#fff" : "rgba(255,255,255,0.55)";
+      ctx.font = `600 ${sc(9)}px 'Nunito', sans-serif`; ctx.textAlign = "center";
+      ctx.fillText(sk[4].split(" ")[1], sx2 + (skinW - sc(6))/2, sy2 + sc(46));
+
+      // hit area recorded for click
+    });
+
+    drawPageDots(cx, cardY + ch - sc(40), 2, 1);
+    drawNeonButton(cx, cardY + ch - sc(14), sc(190), sc(42), "▶  LET'S PLAY!", "#0ea5e9", "#0284c7");
+  }
+
+  // tap note at very bottom
+  ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.font = `${sc(10)}px 'Nunito', sans-serif`;
+  ctx.textAlign = "center";
+  ctx.fillText("Developed by Sathwik Rai", cx, canvas.height - sc(10));
+
+  frames++;
+}
+
+function drawPageDots(cx, y, total, current) {
+  for (let i = 0; i < total; i++) {
+    ctx.beginPath();
+    ctx.arc(cx + (i - (total-1)/2) * sc(18), y, sc(4), 0, Math.PI*2);
+    ctx.fillStyle = i === current ? "#a78bfa" : "rgba(255,255,255,0.25)";
+    ctx.fill();
+  }
+}
+
+function drawNeonButton(cx, bottomY, w, h, label, c1, c2) {
+  const bx = cx - w/2, by = bottomY - h;
+  const pulse = 0.88 + Math.sin(frames * 0.08) * 0.12;
+  ctx.save();
+  ctx.translate(cx, by + h/2); ctx.scale(pulse, pulse); ctx.translate(-cx, -(by+h/2));
+  const bg = ctx.createLinearGradient(bx, 0, bx+w, 0);
+  bg.addColorStop(0, c1); bg.addColorStop(1, c2);
+  ctx.beginPath(); ctx.roundRect(bx, by, w, h, sc(13));
+  ctx.fillStyle = bg; ctx.shadowColor = c1; ctx.shadowBlur = sc(16);
+  ctx.fill(); ctx.shadowBlur = 0;
+  ctx.fillStyle = "#fff"; ctx.font = `700 ${sc(14)}px 'Fredoka One', cursive`;
+  ctx.textAlign = "center"; ctx.fillText(label, cx, by + h*0.62);
+  ctx.restore();
+}
+
+// ── Menu (skin + start) – now goes straight to playing ───────
+// (Instructions already has skin selector; menu is skipped)
+
+// ── GAME OVER screen ─────────────────────────────────────────
+function showDeadScreen() {
+  ctx.fillStyle = "rgba(0,0,8,0.82)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const cx = canvas.width / 2, cy = canvas.height / 2;
+  const cw = Math.min(sc(400), canvas.width - sc(28));
+  const ch = Math.min(sc(440), canvas.height - sc(50));
+  const cardX = cx - cw/2, cardY = cy - ch/2;
+
+  ctx.beginPath(); ctx.roundRect(cardX, cardY, cw, ch, sc(22));
+  const cg = ctx.createLinearGradient(cardX,cardY,cardX,cardY+ch);
+  cg.addColorStop(0,"rgba(20,5,40,0.97)"); cg.addColorStop(1,"rgba(10,2,25,0.97)");
+  ctx.fillStyle = cg; ctx.fill();
+  ctx.strokeStyle = "rgba(248,113,113,0.5)"; ctx.lineWidth = sc(2); ctx.stroke();
+
+  // Red top bar
+  const rb = ctx.createLinearGradient(cardX,0,cardX+cw,0);
+  rb.addColorStop(0,"#dc2626"); rb.addColorStop(0.5,"#f97316"); rb.addColorStop(1,"#dc2626");
+  ctx.fillStyle = rb;
+  ctx.beginPath(); ctx.roundRect(cardX, cardY, cw, sc(5), [sc(22),sc(22),0,0]); ctx.fill();
+
+  // Heading
+  const hg = ctx.createLinearGradient(cx-sc(120),0,cx+sc(120),0);
+  hg.addColorStop(0,"#f87171"); hg.addColorStop(1,"#fbbf24");
+  ctx.fillStyle = hg;
+  ctx.font = `900 ${Math.min(sc(44), canvas.width*0.085)}px 'Fredoka One', cursive`;
+  ctx.textAlign = "center"; ctx.fillText("GAME OVER", cx, cardY + sc(62));
+
+  ctx.fillStyle = "rgba(255,255,255,0.55)";
+  ctx.font = `italic ${sc(12)}px 'Nunito', sans-serif`;
+  ctx.fillText(motivMsg, cx, cardY + sc(84));
+
+  // divider
+  ctx.strokeStyle="rgba(248,113,113,0.22)"; ctx.lineWidth=sc(1);
+  ctx.beginPath(); ctx.moveTo(cardX+sc(24),cardY+sc(96)); ctx.lineTo(cardX+cw-sc(24),cardY+sc(96)); ctx.stroke();
+
+  // Stats 2-col
+  const stats = [
+    ["SCORE",     score,                    "#f8fafc"],
+    ["BEST",      highScore,                "#fbbf24"],
+    ["COINS",     coins,                    "#fbbf24"],
+    ["MAX COMBO", `×${maxCombo}`,           "#4ade80"],
+    ["DISTANCE",  `${Math.floor(distTraveled)}m`, "#7dd3fc"],
+  ];
+  const sw2 = (cw - sc(36)) / 2, sh = sc(58), sgap = sc(8);
+  stats.forEach(([lbl, val, col], i) => {
+    const c2 = i%2, r2 = Math.floor(i/2);
+    const sx2 = cardX + sc(12) + c2*(sw2+sc(12));
+    const sy2 = cardY + sc(106) + r2*(sh+sgap);
+    glass(sx2, sy2, sw2, sh, sc(9));
+    ctx.fillStyle = col;
+    ctx.font = `900 ${sc(20)}px 'Fredoka One', cursive`;
+    ctx.textAlign = "center"; ctx.fillText(val, sx2+sw2/2, sy2+sh*0.56);
+    ctx.fillStyle = "rgba(255,255,255,0.38)";
+    ctx.font = `${sc(10)}px 'Nunito', sans-serif`;
+    ctx.fillText(lbl, sx2+sw2/2, sy2+sh*0.83);
+  });
+
+  // PLAY AGAIN button
+  const btnW = sc(200), btnH = sc(46), btnX = cx-btnW/2;
+  const btnY = cardY + ch - btnH - sc(14);
+  const btnG = ctx.createLinearGradient(btnX,0,btnX+btnW,0);
+  btnG.addColorStop(0,"#7c3aed"); btnG.addColorStop(1,"#a21caf");
+  ctx.beginPath(); ctx.roundRect(btnX,btnY,btnW,btnH,sc(13));
+  ctx.fillStyle = btnG; ctx.shadowColor="#a78bfa"; ctx.shadowBlur=sc(14);
+  ctx.fill(); ctx.shadowBlur=0;
+  ctx.fillStyle="#fff"; ctx.font=`700 ${sc(15)}px 'Fredoka One', cursive`;
+  ctx.textAlign="center"; ctx.fillText("↩  PLAY AGAIN", cx, btnY+btnH*0.63);
+
+  ctx.fillStyle = "rgba(255,255,255,0.22)";
+  ctx.font = `${sc(10)}px 'Nunito', sans-serif`;
+  ctx.fillText("Developed by Sathwik Rai", cx, canvas.height - sc(10));
+}
+
+// ── Main game loop ────────────────────────────────────────────
+function loop() {
+  // screen shake
+  ctx.save();
+  if (screenShake > 0) {
+    ctx.translate((Math.random()-0.5)*screenShake*2, (Math.random()-0.5)*screenShake*2);
+    screenShake *= 0.7;
+    if (screenShake < 0.4) screenShake = 0;
+  }
+
+  ctx.clearRect(-20,-20,canvas.width+40,canvas.height+40);
+
+  // ── instructions state ──
+  if (state === STATE.INSTRUCTIONS) {
+    drawInstructions();
     ctx.restore();
     requestAnimationFrame(loop);
     return;
   }
 
-  distanceTraveled += pipeSpeed / 60;
+  // ── background ──
+  drawBackground();
 
-  if (frames % PIPE_SPAWN_RATE === 0) { addPipe(); addRandomCoin(); }
+  // smooth night transition
+  if (theme === "night" && nightTransAlpha < 1) nightTransAlpha = Math.min(1, nightTransAlpha + 0.02);
+  if (theme === "day"   && nightTransAlpha > 0) nightTransAlpha = Math.max(0, nightTransAlpha - 0.02);
 
-  const currentSpeed = ball.powerUp === "speed" ? pipeSpeed * 0.55 : pipeSpeed;
+  // ── sparkles ──
+  for (let i = sparkles.length-1; i >= 0; i--) {
+    const s = sparkles[i];
+    s.x += s.vx; s.y += s.vy; s.life--; s.size *= 0.93;
+    ctx.globalAlpha = s.life/50;
+    ctx.fillStyle = s.color;
+    ctx.beginPath(); ctx.arc(s.x,s.y,s.size,0,Math.PI*2); ctx.fill();
+    if (s.life <= 0) sparkles.splice(i,1);
+  }
+  ctx.globalAlpha = 1;
 
-  drawPipes(currentSpeed);
+  if (state === STATE.DEAD) {
+    showDeadScreen();
+    ctx.restore();
+    return; // stop updating game, just show overlay
+  }
 
-  // Coins
-  for (let i = coinsArray.length - 1; i >= 0; i--) {
-    const coin = coinsArray[i];
-    if (coin.collected) continue;
-    if (ball.powerUp === "magnet") {
-      const dx = ball.x - coin.x, dy = ball.y - coin.y;
-      const dist = Math.sqrt(dx*dx + dy*dy);
-      if (dist < 200) { coin.x += dx * 0.14; coin.y += dy * 0.14; }
-      else coin.x -= currentSpeed;
-    } else {
-      coin.x -= currentSpeed;
+  // ── PLAYING ──
+  distTraveled += pipeSpeed / 60;
+
+  if (frames % PIPE_SPAWN_INT === 0) { addPipe(); addCollectibles(); }
+
+  const spd = ball.powerUp === "slow" ? pipeSpeed * 0.5 : pipeSpeed;
+
+  // pipes
+  for (let i = pipes.length-1; i >= 0; i--) {
+    const p = pipes[i];
+    p.x -= spd;
+    drawPipe(p);
+
+    // collision
+    if (!ball.powerUp || ball.powerUp !== "shield") {
+      if (
+        ball.x + ball.radius > p.x &&
+        ball.x - ball.radius < p.x + p.pw &&
+        (ball.y - ball.radius < p.top || ball.y + ball.radius > p.bottom)
+      ) { handleGameOver(); ctx.restore(); return; }
     }
-    drawCoin(coin);
-    const dx = ball.x - coin.x, dy = ball.y - coin.y;
-    if (Math.sqrt(dx*dx + dy*dy) < ball.radius + 13) {
-      coin.collected = true; coins++; combo++;
+
+    // score
+    if (!p.passed && p.x + p.pw < ball.x) {
+      p.passed = true; score++; combo++;
       maxCombo = Math.max(maxCombo, combo);
-      try { coinSound.currentTime = 0; coinSound.play(); } catch(e){}
-      createSparkle(coin.x, coin.y, "#fbbf24");
-      coinsArray.splice(i, 1); continue;
+      spawnFloat(ball.x + sc(30), ball.y - sc(25), "+1", "#fbbf24");
+      if (score % 30 === 0) theme = theme === "day" ? "night" : "day";
+      if (score % SPEED_UP_EVERY === 0) pipeSpeed = Math.min(pipeSpeed + SPEED_INC, 4.8);
     }
-    if (coin.x + 20 < 0) coinsArray.splice(i, 1);
+    if (p.x + p.pw < 0) pipes.splice(i,1);
   }
 
-  // Power-ups
-  for (let i = powerUpsArray.length - 1; i >= 0; i--) {
-    const pu = powerUpsArray[i];
-    if (pu.collected) continue;
-    pu.x -= currentSpeed;
-    drawPowerUp(pu);
-    const dx = ball.x - pu.x, dy = ball.y - pu.y;
-    if (Math.sqrt(dx*dx + dy*dy) < ball.radius + 16) {
-      pu.collected = true;
-      ball.activatePowerUp(pu.type);
-      const c = pu.type === "shield" ? "#34d399" : pu.type === "magnet" ? "#fbbf24" : "#f87171";
-      createSparkle(pu.x, pu.y, c);
-      combo++; maxCombo = Math.max(maxCombo, combo);
-      powerUpsArray.splice(i, 1); continue;
+  // coins
+  for (let i = coinsArr.length-1; i >= 0; i--) {
+    const c = coinsArr[i];
+    if (c.hit) continue;
+    if (ball.powerUp === "magnet") {
+      const dx = ball.x-c.x, dy = ball.y-c.y;
+      if (Math.sqrt(dx*dx+dy*dy) < sc(180)) { c.x += dx*0.13; c.y += dy*0.13; }
+      else c.x -= spd;
+    } else { c.x -= spd; }
+    drawCoin(c);
+    const dx=ball.x-c.x, dy=ball.y-c.y;
+    if (Math.sqrt(dx*dx+dy*dy) < ball.radius + sc(13)) {
+      c.hit = true; coins++; combo++; maxCombo = Math.max(maxCombo,combo);
+      play("coin"); burst(c.x,c.y,"#fbbf24",8);
+      spawnFloat(c.x, c.y-sc(20), "+✦", "#fbbf24");
+      coinsArr.splice(i,1); continue;
     }
-    if (pu.x + 20 < 0) powerUpsArray.splice(i, 1);
+    if (c.x < -sc(30)) coinsArr.splice(i,1);
   }
 
-  ball.update();
-  ball.draw();
+  // power-ups
+  for (let i = puArr.length-1; i >= 0; i--) {
+    const pu = puArr[i];
+    if (pu.hit) continue;
+    pu.x -= spd; drawPowerUp(pu);
+    const dx=ball.x-pu.x, dy=ball.y-pu.y;
+    if (Math.sqrt(dx*dx+dy*dy) < ball.radius + sc(16)) {
+      pu.hit = true; ball.activatePowerUp(pu.type);
+      const c2 = pu.type==="shield"?"#34d399":pu.type==="magnet"?"#fbbf24":"#f472b6";
+      burst(pu.x,pu.y,c2,12);
+      combo++; maxCombo = Math.max(maxCombo,combo);
+      puArr.splice(i,1); continue;
+    }
+    if (pu.x < -sc(30)) puArr.splice(i,1);
+  }
 
-  // Ground collision
+  // ball
+  ball.update(); ball.draw();
+
+  // boundaries
   if (!ball.powerUp || ball.powerUp !== "shield") {
-    if (ball.y + ball.radius > canvas.height - 40) { handleGameOver(); return; }
-    if (ball.y - ball.radius < 0) { ball.velocity = 1; ball.y = ball.radius + 1; }
+    if (ball.y + ball.radius > canvas.height * 0.92) { handleGameOver(); ctx.restore(); return; }
   }
+  if (ball.y - ball.radius < 0) { ball.velocity = Math.abs(ball.velocity)*0.3; ball.y = ball.radius; }
 
-  updateScoreFloats();
+  drawFloats();
   drawHUD();
 
   frames++;
   ctx.restore();
-  if (!gameOver) requestAnimationFrame(loop);
+  requestAnimationFrame(loop);
 }
 
-// ─── MENU SCREEN ──────────────────────────────────────────────
-function drawMenuScreen() {
-  // Dim overlay
-  ctx.fillStyle = "rgba(5,5,20,0.72)";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  const cx = canvas.width / 2;
-  const cy = canvas.height / 2;
-
-  // Title card
-  const cardW = Math.min(520, canvas.width - 40);
-  const cardH = 380;
-  const cardX = cx - cardW / 2;
-  const cardY = cy - cardH / 2 - 20;
-
-  // Card glass
-  ctx.beginPath();
-  ctx.roundRect(cardX, cardY, cardW, cardH, 24);
-  ctx.fillStyle = "rgba(15,15,50,0.75)";
-  ctx.fill();
-  ctx.strokeStyle = "rgba(167,139,250,0.4)";
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-
-  // Animated title
-  const titleGrad = ctx.createLinearGradient(cardX, 0, cardX + cardW, 0);
-  titleGrad.addColorStop(0, "#60a5fa");
-  titleGrad.addColorStop(0.5, "#e879f9");
-  titleGrad.addColorStop(1, "#fbbf24");
-  ctx.fillStyle = titleGrad;
-  ctx.font = `bold ${Math.min(42, canvas.width * 0.06)}px 'Orbitron', sans-serif`;
-  ctx.textAlign = "center";
-  ctx.fillText("MAGIC BALL", cx, cardY + 62);
-  ctx.font = `bold ${Math.min(28, canvas.width * 0.04)}px 'Orbitron', sans-serif`;
-  ctx.fillStyle = "rgba(255,255,255,0.75)";
-  ctx.fillText("ADVENTURE", cx, cardY + 96);
-
-  // Divider
-  ctx.strokeStyle = "rgba(167,139,250,0.3)";
-  ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(cardX + 30, cardY + 112); ctx.lineTo(cardX + cardW - 30, cardY + 112); ctx.stroke();
-
-  // Power-up legend
-  const items = [["🛡", "SHIELD", "#34d399", "Invincibility"], ["🧲", "MAGNET", "#fbbf24", "Attract coins"], ["⚡", "SPEED", "#f87171", "Slow motion"]];
-  items.forEach(([icon, label, color, desc], idx) => {
-    const iy = cardY + 140 + idx * 52;
-    const ix = cx - 150;
-    glassBox(ix, iy, 300, 40, 10);
-    ctx.fillStyle = color;
-    ctx.font = "bold 15px 'Orbitron', sans-serif";
-    ctx.textAlign = "left";
-    ctx.fillText(`${icon}  ${label}`, ix + 16, iy + 26);
-    ctx.fillStyle = "rgba(255,255,255,0.5)";
-    ctx.font = "13px 'Rajdhani', sans-serif";
-    ctx.textAlign = "right";
-    ctx.fillText(desc, ix + 284, iy + 26);
-  });
-
-  // High score
-  if (highScore > 0) {
-    ctx.fillStyle = "#fbbf24";
-    ctx.font = "bold 17px 'Orbitron', sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText(`★  BEST: ${highScore}`, cx, cardY + 320);
-  }
-
-  // Pulsing start button
-  const btnPulse = Math.sin(frames * 0.07) * 0.12 + 0.88;
-  const btnW = 230, btnH = 52;
-  const btnX = cx - btnW / 2, btnY = cardY + cardH + 18;
-  ctx.save();
-  ctx.translate(cx, btnY + btnH / 2);
-  ctx.scale(btnPulse, btnPulse);
-  ctx.translate(-cx, -(btnY + btnH / 2));
-
-  const btnGrad = ctx.createLinearGradient(btnX, 0, btnX + btnW, 0);
-  btnGrad.addColorStop(0, "#7c3aed"); btnGrad.addColorStop(1, "#a21caf");
-  ctx.beginPath(); ctx.roundRect(btnX, btnY, btnW, btnH, 14);
-  ctx.fillStyle = btnGrad;
-  ctx.shadowColor = "#a78bfa"; ctx.shadowBlur = 18;
-  ctx.fill(); ctx.shadowBlur = 0;
-
-  ctx.fillStyle = "#fff";
-  ctx.font = "bold 18px 'Orbitron', sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText("▶  PLAY NOW", cx, btnY + 33);
-  ctx.restore();
-
-  // Animated demo ball
-  ball.x = cx;
-  ball.y = cardY - 50 + Math.sin(frames * 0.04) * 18;
-  ball.rotation = frames * 0.025;
-  ball.draw();
-
-  // Dev credit
-  ctx.fillStyle = "rgba(255,255,255,0.3)";
-  ctx.font = "12px 'Rajdhani', sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText("Developed by Sathwik Rai", cx, canvas.height - 22);
-}
-
-// ─── GAME OVER ────────────────────────────────────────────────
+// ── Game over ────────────────────────────────────────────────
 function handleGameOver() {
-  if (gameOver) return;
-  gameOver = true;
-  screenShake = 12;
-  currentMotivationalMessage = motivationalMessages[Math.floor(Math.random() * motivationalMessages.length)];
-  if (score > highScore) { highScore = score; localStorage.setItem('flappyHighScore', highScore); }
-  try { bgm.pause(); bgm.currentTime = 0; hitSound.play(); } catch(e){}
-  setTimeout(() => { try { gameOverSound.play(); } catch(e){} }, 400);
-  showGameOverScreen();
+  if (state === STATE.DEAD) return;
+  state = STATE.DEAD;
+  screenShake = 14;
+  motivMsg = MOTIV[Math.floor(Math.random()*MOTIV.length)];
+  if (score > highScore) { highScore = score; localStorage.setItem("mbaHigh", highScore); }
+  try { SFX.bgm.pause(); SFX.bgm.currentTime = 0; play("hit"); } catch(e){}
+  setTimeout(() => play("over"), 400);
+  showDeadScreen();
 }
 
-function showGameOverScreen() {
-  // Dim background (keep drawing)
-  ctx.fillStyle = "rgba(0,0,0,0.80)";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  const cx = canvas.width / 2;
-  const cy = canvas.height / 2;
-  const cardW = Math.min(500, canvas.width - 40);
-  const cardH = 420;
-  const cardX = cx - cardW / 2;
-  const cardY = cy - cardH / 2;
-
-  // Card
-  ctx.beginPath(); ctx.roundRect(cardX, cardY, cardW, cardH, 24);
-  ctx.fillStyle = "rgba(12,10,35,0.92)"; ctx.fill();
-  ctx.strokeStyle = "rgba(248,113,113,0.45)"; ctx.lineWidth = 2; ctx.stroke();
-
-  // "GAME OVER" heading
-  ctx.font = `bold ${Math.min(52, canvas.width * 0.07)}px 'Orbitron', sans-serif`;
-  ctx.textAlign = "center";
-  const goGrad = ctx.createLinearGradient(cx - 150, 0, cx + 150, 0);
-  goGrad.addColorStop(0, "#f87171"); goGrad.addColorStop(1, "#fbbf24");
-  ctx.fillStyle = goGrad;
-  ctx.fillText("GAME OVER", cx, cardY + 65);
-
-  // Motivational
-  ctx.font = `italic 16px 'Rajdhani', sans-serif`;
-  ctx.fillStyle = "rgba(255,255,255,0.65)";
-  ctx.fillText(currentMotivationalMessage, cx, cardY + 98);
-
-  // Divider
-  ctx.strokeStyle = "rgba(248,113,113,0.25)"; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(cardX + 30, cardY + 116); ctx.lineTo(cardX + cardW - 30, cardY + 116); ctx.stroke();
-
-  // Stats grid
-  const stats = [
-    ["SCORE", score, "#f8fafc"],
-    ["HIGH SCORE", highScore, "#fbbf24"],
-    ["COINS", coins, "#fbbf24"],
-    ["MAX COMBO", `×${maxCombo}`, "#4ade80"],
-    ["DISTANCE", `${Math.floor(distanceTraveled)}m`, "#60a5fa"],
-  ];
-
-  stats.forEach(([label, val, color], i) => {
-    const row = Math.floor(i / 2);
-    const col = i % 2;
-    const sx = cardX + 30 + col * (cardW / 2 - 10);
-    const sy = cardY + 140 + row * 72;
-    const sw = cardW / 2 - 40;
-
-    glassBox(sx, sy, sw, 56, 10);
-    ctx.fillStyle = color;
-    ctx.font = `bold 22px 'Orbitron', sans-serif`;
-    ctx.textAlign = "center";
-    ctx.fillText(val, sx + sw / 2, sy + 34);
-    ctx.fillStyle = "rgba(255,255,255,0.4)";
-    ctx.font = "11px 'Rajdhani', sans-serif";
-    ctx.fillText(label, sx + sw / 2, sy + 49);
-  });
-
-  // Restart button
-  const btnW = 230, btnH = 52;
-  const btnX = cx - btnW / 2, btnY = cardY + cardH - 70;
-  const btnGrad = ctx.createLinearGradient(btnX, 0, btnX + btnW, 0);
-  btnGrad.addColorStop(0, "#7c3aed"); btnGrad.addColorStop(1, "#a21caf");
-  ctx.beginPath(); ctx.roundRect(btnX, btnY, btnW, btnH, 14);
-  ctx.fillStyle = btnGrad;
-  ctx.shadowColor = "#a78bfa"; ctx.shadowBlur = 16;
-  ctx.fill(); ctx.shadowBlur = 0;
-
-  ctx.fillStyle = "#fff";
-  ctx.font = "bold 16px 'Orbitron', sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText("↩  PLAY AGAIN", cx, btnY + 33);
-
-  // Dev credit
-  ctx.fillStyle = "rgba(255,255,255,0.3)";
-  ctx.font = "12px 'Rajdhani', sans-serif";
-  ctx.fillText("Developed by Sathwik Rai", cx, canvas.height - 22);
+// ── Reset & start game ───────────────────────────────────────
+function startGame() {
+  // clear all arrays
+  pipes.length = 0; coinsArr.length = 0; puArr.length = 0;
+  sparkles.length = 0; scoreFloats.length = 0;
+  score = 0; coins = 0; combo = 0; maxCombo = 0;
+  distTraveled = 0; pipeSpeed = INIT_SPEED; theme = "day"; nightTransAlpha = 0;
+  gameOver = false; state = STATE.PLAYING;
+  ball.init();
+  try { SFX.bgm.currentTime = 0; SFX.bgm.play(); } catch(e){}
 }
 
-// ─── INPUT ────────────────────────────────────────────────────
-function startOrFlap() {
-  if (!gameStarted) {
-    gameStarted = true;
-    ball.x = 110; ball.y = canvas.height / 2; ball.velocity = 0;
-    try { bgm.play(); } catch(e){}
+// ── Input handler ─────────────────────────────────────────────
+function handleTap(clientX, clientY) {
+  if (state === STATE.INSTRUCTIONS) {
+    // Check if tapping next/play button area or skin cards
+    if (instrPage === 1) {
+      // Check skin card taps
+      const cx = canvas.width/2, cy2 = canvas.height/2;
+      const cw = Math.min(sc(420), canvas.width - sc(28));
+      const ch = Math.min(sc(500), canvas.height - sc(60));
+      const cardX = cx - cw/2, cardY = cy2 - ch/2;
+
+      const puH = sc(48) + sc(6); // 3 rows of pu
+      let py2 = cardY + sc(52) + 3*puH + sc(24) + sc(10);
+      const skinW = (cw - sc(28)) / 3;
+      SKINS.forEach((_, idx) => {
+        const col = idx % 3, row = Math.floor(idx / 3);
+        const sx2 = cardX + sc(14) + col * skinW;
+        const sy2 = py2 + row * sc(58);
+        if (clientX >= sx2 && clientX <= sx2 + skinW - sc(6) &&
+            clientY >= sy2 && clientY <= sy2 + sc(52)) {
+          selectedSkin = idx;
+        }
+      });
+    }
+    // Always advance page / start on any tap (bottom area acts as button)
+    const btnY = (canvas.height/2 + Math.min(sc(500),canvas.height-sc(60))/2) - sc(14) - sc(42);
+    if (clientY >= btnY || clientY > canvas.height * 0.7) {
+      if (instrPage === 0) { instrPage = 1; }
+      else { startGame(); }
+    }
     return;
   }
-  if (gameOver) { location.reload(); return; }
-  ball.flap();
+
+  if (state === STATE.DEAD) { instrPage = 0; state = STATE.INSTRUCTIONS; return; }
+  if (state === STATE.PLAYING) { ball.flap(); }
 }
 
-canvas.addEventListener("click", startOrFlap);
-canvas.addEventListener("touchstart", (e) => { e.preventDefault(); startOrFlap(); }, { passive: false });
-document.addEventListener("keydown", (e) => {
-  if (["Space", "ArrowUp", "Enter"].includes(e.code)) { e.preventDefault(); startOrFlap(); }
+canvas.addEventListener("click",      e => handleTap(e.clientX, e.clientY));
+canvas.addEventListener("touchstart", e => {
+  e.preventDefault();
+  handleTap(e.touches[0].clientX, e.touches[0].clientY);
+}, { passive: false });
+document.addEventListener("keydown", e => {
+  if (["Space","ArrowUp","Enter"].includes(e.code)) {
+    e.preventDefault();
+    if (state === STATE.INSTRUCTIONS) { if (instrPage===0) instrPage=1; else startGame(); return; }
+    if (state === STATE.DEAD)    { instrPage=0; state=STATE.INSTRUCTIONS; return; }
+    if (state === STATE.PLAYING) ball.flap();
+  }
 });
 
-// Custom cursor tracking
-document.addEventListener("mousemove", (e) => {
-  const el = document.querySelector("body::after");
-});
-
-// ─── KICK OFF ─────────────────────────────────────────────────
+// ── Boot ──────────────────────────────────────────────────────
+ball.init();
 loop();
