@@ -355,6 +355,14 @@ function drawHUD(){
   ctx.fillStyle="#fbbf24"; ctx.font=F_LABEL;
   ctx.fillText("✦ "+coins+" coins", 28, 92);
 
+  // best score — just below score box
+  ctx.fillStyle="rgba(0,0,0,0.5)";
+  ctx.beginPath(); ctx.roundRect(14,112,170,32,9); ctx.fill();
+  ctx.strokeStyle="rgba(251,191,36,0.4)"; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.roundRect(14,112,170,32,9); ctx.stroke();
+  ctx.fillStyle="#fbbf24"; ctx.font=F_LABEL; ctx.textAlign="left";
+  ctx.fillText("★ BEST: "+highScore, 26, 133);
+
   // distance (top right)
   ctx.fillStyle="rgba(0,0,0,0.5)";
   ctx.beginPath(); ctx.roundRect(canvas.width-108,14,94,32,9); ctx.fill();
@@ -365,11 +373,11 @@ function drawHUD(){
   if(combo > 2){
     const col = combo>8 ? "#f87171" : "#4ade80";
     ctx.fillStyle="rgba(0,0,0,0.5)";
-    ctx.beginPath(); ctx.roundRect(14,114,150,30,9); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(14,152,150,30,9); ctx.fill();
     ctx.strokeStyle=col+"55"; ctx.lineWidth=1.5;
-    ctx.beginPath(); ctx.roundRect(14,114,150,30,9); ctx.stroke();
+    ctx.beginPath(); ctx.roundRect(14,152,150,30,9); ctx.stroke();
     ctx.fillStyle=col; ctx.font=F_LABEL; ctx.textAlign="left";
-    ctx.fillText("⚡ x"+combo+" COMBO", 24, 134);
+    ctx.fillText("⚡ x"+combo+" COMBO", 24, 172);
   }
 
   // power-up bar
