@@ -1,18 +1,32 @@
-* { 
-  margin: 0; 
-  padding: 0; 
-  box-sizing: border-box; 
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
 }
 
 body {
   background: #000;
   overflow: hidden;
-  font-family: 'Poppins', sans-serif;
+  font-family: 'Rajdhani', sans-serif;
+  cursor: none;
 }
 
 #gameCanvas {
   display: block;
   width: 100vw;
   height: 100vh;
-  background: #000;
+}
+
+/* Custom cursor */
+body::after {
+  content: '✦';
+  position: fixed;
+  top: 0; left: 0;
+  pointer-events: none;
+  color: #a78bfa;
+  font-size: 18px;
+  z-index: 9999;
+  transform: translate(-50%, -50%);
+  text-shadow: 0 0 8px #a78bfa;
+  transition: transform 0.1s;
 }
