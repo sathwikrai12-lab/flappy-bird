@@ -27,7 +27,7 @@
 
 | 📖 How To Play | 🎨 Choose Your Ball |
 |:--------------:|:-------------------:|
-| ![How To Play](screenshots/howtoplay.png) | ![Skin Select](screenshots/skinselect.png) |
+| ![How To Play](howtoplay.png) | ![Skin Select](skinselect.png) |
 
 </div>
 
